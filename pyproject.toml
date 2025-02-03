@@ -1,0 +1,12 @@
+[project]
+name = "dotact-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "dota2gsipy>=0.1.0",
+    "jupyter>=1.1.1",
+    "numpy>=2.2.2",
+    "pandas>=2.2.3",
+]

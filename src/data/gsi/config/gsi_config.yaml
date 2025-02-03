@@ -1,0 +1,9 @@
+server:
+  host: "127.0.0.1"
+  port: 4000
+
+auth:
+  token: "my_super_secret_token_123!"
+
+logging:
+  level: "INFO"

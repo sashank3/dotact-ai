@@ -1,32 +1,35 @@
 import logging
+import threading
+from src.data.gsi.server.gsi_server import start_gsi_server
 from src.data.gsi.utils.logger import setup_logging
-from src.data.gsi.extraction.extraction import extraction
-# Import other orchestrators as needed
+from src.data.gsi.extraction.gsi_file_setup import gsi_file_setup
+from src.data.gsi.processing.gsi_data_provider import fetch_and_process_game_state
 
 
 def gsi_orchestrator():
     """
-    Main orchestrator for the GSI module. Calls individual orchestrators for extraction,
-    cleaning, processing, etc.
+    Sets up GSI config and starts the FastAPI server in a background thread.
     """
-    setup_logging()  # Initialize logging
+    setup_logging()
+    logging.info("[GSI ORCHESTRATOR] Initializing...")
 
-    try:
-        logging.info("Running GSI extraction orchestrator...")
-        extraction()
+    # 1) Set up the GSI config file
+    gsi_file_setup()
 
-        # Call other orchestrators as needed
-        # logging.info("Running GSI cleaning orchestrator...")
-        # cleaning_orchestrator()
+    # 2) Launch server in a separate, NON-daemon thread
+    server_thread = threading.Thread(
+        target=start_gsi_server,
+        daemon=False  # Non-daemon => the process stays alive while this thread runs
+    )
+    server_thread.start()
 
-        # logging.info("Running GSI processing orchestrator...")
-        # processing_orchestrator()
-
-        logging.info("GSI module orchestrator completed successfully.")
-
-    except Exception as e:
-        logging.error(f"An error occurred in the GSI module orchestrator: {e}")
+    logging.info("[GSI ORCHESTRATOR] GSI server launched in the background.")
 
 
-if __name__ == "__main__":
-    gsi_orchestrator()
+def get_processed_gsi_data() -> str:
+    """
+    Returns the latest processed GSI data (text).
+    A simple convenience function so other parts of your app
+    only need to call this, rather than direct manager calls.
+    """
+    return fetch_and_process_game_state()

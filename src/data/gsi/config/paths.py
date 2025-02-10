@@ -17,6 +17,9 @@ LOGS_DIR = os.path.join(BASE_DIR, "logs")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 
-# Ensure directories exist (e.g., logs and cache)
-os.makedirs(LOGS_DIR, exist_ok=True)
-os.makedirs(CACHE_DIR, exist_ok=True)
+# Ensure directories exist (with error handling)
+for directory in [LOGS_DIR, DATA_DIR, CACHE_DIR]:
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except OSError as e:
+        print(f"Error creating directory {directory}: {e}")

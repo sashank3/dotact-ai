@@ -6,9 +6,13 @@ from src.data.gsi.config.paths import LOGS_DIR
 def setup_logging(log_file="gsi_module.log"):
     """
     Configures logging for the GSI module.
-    :param log_file: Name of the log file where logs will be saved.
+    Ensures that duplicate handlers are not added.
     """
     log_path = os.path.join(LOGS_DIR, log_file)
+
+    # Check if handlers are already set up
+    if len(logging.getLogger().handlers) > 0:
+        return  # Prevent duplicate handlers
 
     # Create handlers
     file_handler = logging.FileHandler(log_path, mode="a")

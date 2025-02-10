@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "dota2gsipy>=0.1.0",
-    "jupyter>=1.1.1",
+    "fastapi>=0.115.8",
     "numpy>=2.2.2",
-    "pandas>=2.2.3",
+    "openai>=1.61.1",
+    "pyyaml>=6.0.2",
+    "uvicorn>=0.34.0",
 ]

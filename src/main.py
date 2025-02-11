@@ -1,13 +1,12 @@
 import logging
 from dotenv import load_dotenv
-from src.llm.config.paths import ENV_FILE
 from src.data.gsi.gsi import gsi_orchestrator, get_processed_gsi_data
 from src.llm.llm import LLMOrchestrator
 
 
 def main():
     # Load .env if present
-    load_dotenv(dotenv_path=ENV_FILE)
+    load_dotenv()
 
     logging.info("[MAIN] Starting GSI pipeline...")
     gsi_orchestrator()  # Launches server in a background thread

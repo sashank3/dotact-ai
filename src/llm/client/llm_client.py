@@ -1,19 +1,25 @@
+import os
 import logging
 import json
 from openai import OpenAI
-from src.llm.config.llm_config import LLMConfig
+from src.config.global_config import GLOBAL_CONFIG
 
 
 class LLMClient:
     """
-    A client that uses the Nebius-based OpenAI-like library for chat completions.
+    A client that interacts with the Nebius-based OpenAI-compatible API.
     """
 
     def __init__(self):
-        self.api_key = LLMConfig.NEBIUS_API_KEY
-        self.base_url = LLMConfig.BASE_URL
-        self.model = LLMConfig.MODEL_NAME
-        self.default_params = LLMConfig.DEFAULT_PARAMS
+        llm_config = GLOBAL_CONFIG["llm"]
+
+        # API key (override with ENV if set)
+        self.api_key = llm_config.get("api_key", "None")
+        self.api_key = self.api_key if self.api_key != "None" else os.getenv("NEBIUS_API_KEY")
+
+        self.base_url = llm_config.get("base_url", "https://api.studio.nebius.ai/v1/")
+        self.model = llm_config.get("model_name", "deepseek-ai/DeepSeek-R1")
+        self.default_params = llm_config.get("default_params", {})
 
         # Initialize the Nebius "OpenAI" client
         self.client = OpenAI(
@@ -23,37 +29,25 @@ class LLMClient:
 
     def generate_text(self, messages, **kwargs) -> str:
         """
-        Calls the Nebius-based Chat Completions endpoint with the given messages.
-        Returns the text from the first assistant message.
-
-        'messages' should be a list of dicts, e.g.:
-           [
-             {"role": "system", "content": "..."},
-             {"role": "user", "content": "..."}
-           ]
+        Calls the LLM API with chat completion request.
         """
 
-        # Merge default params with any function-level overrides
+        # Merge default params with overrides
         params = {**self.default_params, **kwargs}
 
         logging.info("[LLM CLIENT] Sending chat completion request with params: %s", params)
         completion = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            **params  # e.g. temperature=..., max_tokens=..., etc.
+            **params
         )
 
-        # According to the doc, you can do completion.to_json() or parse it
         completion_str = completion.to_json()
-        # Typically the response includes: {"choices": [{"message": {"content": "..."} }]}
         completion_json = json.loads(completion_str)
         choices = completion_json.get("choices", [])
+
         if not choices:
-            logging.warning("[LLM CLIENT] No 'choices' in completion. Full response: %s", completion_json)
+            logging.warning("[LLM CLIENT] No 'choices' returned. Full response: %s", completion_json)
             return "[No text returned]"
 
-        # Grab the assistant's content from the first choice
-        first_choice = choices[0]
-        msg = first_choice.get("message", {})
-        text_output = msg.get("content", "[No content in assistant's message]")
-        return text_output
+        return choices[0].get("message", {}).get("content", "[No content in response]")

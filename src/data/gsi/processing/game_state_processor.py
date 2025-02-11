@@ -1,6 +1,3 @@
-import logging
-
-
 def convert_game_state_to_text(game_state: dict) -> str:
     """
     Converts a raw game state dictionary into a more readable text format.

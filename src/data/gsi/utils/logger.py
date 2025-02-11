@@ -1,6 +1,12 @@
 import logging
 import os
-from src.data.gsi.config.paths import LOGS_DIR
+from src.config.global_config import GLOBAL_CONFIG  # Import the new global config
+
+# Retrieve log directory from global config
+LOGS_DIR = GLOBAL_CONFIG.get("data", {}).get("gsi", {}).get("logs_dir", "logs")  # Default to "logs" if missing
+
+# Ensure the log directory exists
+os.makedirs(LOGS_DIR, exist_ok=True)
 
 
 def setup_logging(log_file="gsi_module.log"):

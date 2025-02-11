@@ -1,35 +1,39 @@
 import logging
+from dotenv import load_dotenv
+from src.llm.config.paths import ENV_FILE
 from src.data.gsi.gsi import gsi_orchestrator, get_processed_gsi_data
+from src.llm.llm import LLMOrchestrator
 
 
 def main():
-    # 1) Start GSI pipeline (in background thread)
-    logging.info("[MAIN] Starting GSI pipeline...")
-    gsi_orchestrator()
+    # Load .env if present
+    load_dotenv(dotenv_path=ENV_FILE)
 
-    # 2) Enter a loop to continuously accept user queries
+    logging.info("[MAIN] Starting GSI pipeline...")
+    gsi_orchestrator()  # Launches server in a background thread
+
+    llm_orch = LLMOrchestrator()
+
     while True:
-        user_input = input("\nEnter your query (type 'exit' to quit): ")
+        user_input = input("\nEnter your query (or 'exit' to quit): ")
         if user_input.lower() == "exit":
-            logging.info("[MAIN] Exiting application at user request.")
             break
 
-        # 3) Get the latest processed GSI data
-        processed_gsi_data = get_processed_gsi_data()
-        print(processed_gsi_data)
+        # Get processed GSI data for context
+        game_state_text = get_processed_gsi_data()
 
-        # 4) Combine with user query
-        combined_prompt = f"GAME CONTEXT:\n{processed_gsi_data}\n\nUSER QUERY:\n{user_input}"
+        # Ask LLM
+        response = llm_orch.get_llm_response(user_input, game_state_text)
 
-        # 5) Send to LLM (stubbed)
-        # response = call_llm_api(combined_prompt)
-        response = "[LLM MOCK RESPONSE]: Build items for survivability."
-
-        # 6) Print result
         print("LLM Response:", response)
 
-    logging.info("[MAIN] Application shutting down...")
+    logging.info("[MAIN] Exiting application.")
 
 
 if __name__ == "__main__":
+    # Basic logging format
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
     main()

@@ -76,5 +76,5 @@ def convert_game_state_to_text(game_state: dict) -> str:
 
     # Combine into a single readable string
     formatted_text = "\n".join(text_output)
-    logging.info(f"[GSI PREPROCESSOR] Formatted game state:\n{formatted_text}")
+    # logging.info(f"[GSI PREPROCESSOR] Formatted game state:\n{formatted_text}")
     return formatted_text

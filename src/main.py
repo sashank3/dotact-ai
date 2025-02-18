@@ -2,14 +2,14 @@ import logging
 from dotenv import load_dotenv
 from src.data.gsi.gsi import gsi_orchestrator, get_processed_gsi_data
 from src.llm.llm import LLMOrchestrator
+from src.llm.prompt.response_formatter import process_llm_response
 
 
 def main():
-    # Load .env if present
     load_dotenv()
 
     logging.info("[MAIN] Starting GSI pipeline...")
-    gsi_orchestrator()  # Launches server in a background thread
+    gsi_orchestrator()
 
     llm_orch = LLMOrchestrator()
 
@@ -18,19 +18,16 @@ def main():
         if user_input.lower() == "exit":
             break
 
-        # Get processed GSI data for context
         game_state_text = get_processed_gsi_data()
 
-        # Ask LLM
-        response = llm_orch.get_llm_response(user_input, game_state_text)
+        response_generator = llm_orch.get_llm_response(user_input, game_state_text, stream=True)
 
-        print("LLM Response:", response)
+        process_llm_response(response_generator)
 
     logging.info("[MAIN] Exiting application.")
 
 
 if __name__ == "__main__":
-    # Basic logging format
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s"

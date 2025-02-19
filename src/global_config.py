@@ -2,7 +2,7 @@ import os
 import yaml
 
 # Base directory for the project
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # Define all config file paths
 CONFIG_FILES = {

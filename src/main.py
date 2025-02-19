@@ -1,30 +1,23 @@
 import logging
 from dotenv import load_dotenv
-from src.data.gsi.gsi import gsi_orchestrator, get_processed_gsi_data
-from src.llm.llm import LLMOrchestrator
-from src.llm.prompt.response_formatter import process_llm_response
+from src.data.gsi.gsi import gsi_orchestrator
+from src.ui.ui import start_ui
 
 
 def main():
+    # 1) Load environment variables
     load_dotenv()
 
     logging.info("[MAIN] Starting GSI pipeline...")
+    # 2) Launch GSI in the background
     gsi_orchestrator()
 
-    llm_orch = LLMOrchestrator()
+    logging.info("[MAIN] Starting UI...")
+    # 3) Run Chainlit UI in the foreground
+    #    This call will block until the user stops Chainlit (Ctrl+C or otherwise).
+    start_ui()
 
-    while True:
-        user_input = input("\nEnter your query (or 'exit' to quit): ")
-        if user_input.lower() == "exit":
-            break
-
-        game_state_text = get_processed_gsi_data()
-
-        response_generator = llm_orch.get_llm_response(user_input, game_state_text, stream=True)
-
-        process_llm_response(response_generator)
-
-    logging.info("[MAIN] Exiting application.")
+    logging.info("[MAIN] Exiting main...")
 
 
 if __name__ == "__main__":

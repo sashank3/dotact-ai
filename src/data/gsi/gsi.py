@@ -1,7 +1,7 @@
 import logging
 import threading
 from src.data.gsi.server.gsi_server import start_gsi_server
-from src.data.gsi.utils.logger import setup_logging
+from src.logger import setup_logging
 from src.data.gsi.extraction.gsi_file_setup import gsi_file_setup
 from src.data.gsi.processing.gsi_data_provider import fetch_and_process_game_state
 

@@ -2,13 +2,13 @@ import os
 import logging
 import re
 from openai import OpenAI
-from src.config.global_config import GLOBAL_CONFIG
+from src.global_config import GLOBAL_CONFIG
 
 
 class LLMClient:
     """
-    A client that interacts with the Nebius-based OpenAI-compatible API.
-    Manages streaming and parsing of responses to separate 'thinking' from the actual response.
+    A client that interacts with the Nebius-based OpenAI-compatible API (DeepSeek R1).
+    Manages streaming and parsing of responses to remove <think> sections.
     """
 
     def __init__(self):
@@ -21,6 +21,7 @@ class LLMClient:
         self.model = llm_config.get("model_name", "deepseek-ai/DeepSeek-R1")
         self.default_params = llm_config.get("default_params", {})
 
+        # Initialize the OpenAI-compatible client
         self.client = OpenAI(
             base_url=self.base_url,
             api_key=self.api_key
@@ -29,7 +30,8 @@ class LLMClient:
     def generate_text(self, messages, stream=False, **kwargs):
         """
         Calls the LLM API with a chat completion request.
-        Handles streaming while extracting <think> content separately.
+        If stream=True, returns a generator of tokens (str), skipping <think> content.
+        Otherwise, returns a plain string with <think> removed.
         """
         params = {**self.default_params, **kwargs}
 
@@ -47,17 +49,17 @@ class LLMClient:
             return self._parse_response(response)
 
     def _parse_response(self, response):
-        """
-        Parses a non-streaming response and extracts <think> sections.
-        """
-        raw_text = response.choices[0].message.get("content", "")
-
-        thinking_text, response_text = self._extract_sections(raw_text)
-        return {"thinking": thinking_text, "response": response_text}
+        """Parses a non-streaming response and removes <think> sections."""
+        # 'response.choices[0].message.content' is a string
+        raw_text = response.choices[0].message.content or ""
+        # Remove <think> ... </think> blocks
+        text_no_think = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL)
+        return text_no_think.strip()
 
     def _handle_streaming(self, response):
         """
-        Handles streaming responses while skipping the <think> section.
+        Handles streaming responses while skipping <think> sections.
+        Yields only the final text chunks.
         """
         inside_think = False
 
@@ -65,25 +67,17 @@ class LLMClient:
             if not chunk.choices:
                 continue
 
+            # The current token fragment
             text = chunk.choices[0].delta.content if chunk.choices[0].delta.content else ""
 
+            # If <think> appears, start ignoring
             if "<think>" in text:
                 inside_think = True
+            # If </think> appears, stop ignoring
             if "</think>" in text:
                 inside_think = False
-                text = text.split("</think>", 1)[-1]  # Remove the </think> tag
+                # Remove everything up to and including </think> from this chunk
+                text = text.split("</think>", 1)[-1]
 
-            if not inside_think:
+            if not inside_think and text:
                 yield text
-
-    @staticmethod
-    def _extract_sections(text):
-        """
-        Extracts <think> and response sections from the text using regex.
-        """
-        thinking_match = re.search(r"<think>(.*?)</think>", text, re.DOTALL)
-
-        thinking_text = thinking_match.group(1).strip() if thinking_match else ""
-        response_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-
-        return thinking_text, response_text

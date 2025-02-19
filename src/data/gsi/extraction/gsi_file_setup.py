@@ -1,6 +1,6 @@
 import logging
 import os
-from src.config.global_config import GLOBAL_CONFIG
+from src.global_config import GLOBAL_CONFIG
 
 
 def gsi_file_setup():

@@ -1,60 +1,116 @@
-# Dotact-AI
+# Dotact-ai: LLM-Based Dota 2 Coaching System
 
-Dotact-AI is your intelligent in-game coach and assistant for Dota 2, offering a fully agentic workflow to help you elevate your gameplay. By leveraging advanced real-time data analysis, situational awareness, and personalized insights, Dotact-AI empowers you to make better decisions and refine your strategies like never before.
-
-## Key Features
-
-### 🧠 Agentic Real-Time Coaching
-- **Proactive Guidance**: Acts autonomously to analyze live game conditions and proactively offers advice before you even ask.
-- **Dynamic Context Awareness**: Continuously evaluates factors such as team composition, enemy strategies, and game objectives to tailor recommendations.
-- **Interactive Support**: Responds to in-game queries such as "What item should I buy?" or "How do I counter this hero?" while adapting advice based on the situation.
-
-### 📊 Personalized Insights
-- **Performance Benchmarking**: Tracks your progress over time and compares your gameplay to other Dotact-AI users in your MMR bracket.
-- **Strengths and Opportunities**: Highlights where you excel and identifies areas for improvement, using data-driven insights personalized for you.
-- **Cold Start Functionality**: Provides hero, role, and strategy suggestions for new players or players exploring new roles.
-
-### 🔒 Privacy-Aware Data Storage
-- **User-Controlled Data**: Your gameplay data is stored securely based on your privacy settings. You control what information is collected and how it is used.
-- **Learning From the Community**: Aggregated anonymized data from players helps refine insights, offering benchmarks that improve recommendations across MMR brackets.
-
-### 🌐 Web-Based and Easy to Use
-- **No Installation Hassle**: Dotact-AI is designed as a user-friendly web app. Simply download the provided executable, run it, and start using the assistant without worrying about complex setup or dependencies.
-- **Cross-Platform Support**: Compatible with Windows, macOS, and Linux for seamless accessibility.
-
-## How It Works
-
-1. **Download and Launch**: Download the latest Dotact-AI executable from the official website, run it, and let the app guide you through setup.
-2. **Set Your Preferences**: Configure your privacy settings, link your Steam account, and enable live match integration.
-3. **Play with Confidence**: Start a Dota 2 match, and let Dotact-AI provide real-time guidance and insights tailored to your playstyle and the match situation.
-4. **Analyze and Improve**: After the game, review post-match analysis to understand how you performed and get actionable tips to improve.
-
-## Roadmap
-
-### Near-Term Goals
-- **Expanded Agent Capabilities**: Enabling predictive recommendations and next-step planning during complex matches.
-- **Voice Interaction**: Support for real-time voice commands and responses for hands-free use during gameplay.
-- **MMR-Specific Strategies**: Enhanced recommendations for different MMR brackets to account for varying playstyles and meta differences.
-
-### Long-Term Goals
-- **Team Coordination Features**: Insights and suggestions designed for coordinated team play.
-- **Community Challenges**: Participate in challenges and compare your performance with peers in the Dotact-AI community.
-
-## Privacy and Data Security
-Dotact-AI is built with privacy as a top priority:
-- **Secure Storage**: Your data is stored securely and can be deleted at any time based on your preferences.
-- **Transparency**: You control how much data is collected and how it is used.
-- **Anonymized Insights**: Aggregated anonymized data is used to provide community benchmarks and improve recommendations.
-
-## Contributing
-At this stage, Dotact-AI is not open for direct contributions. Stay tuned for updates on how you can get involved in its development.
-
-## Support
-For support or to report an issue, please visit the [Support Page](https://github.com/sashank3/dotact-ai/issues).
-
-## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+### Table of Contents
+1. [Project Description](#project-description)
+2. [Purpose and Features](#purpose-and-features)
+3. [Data Sources](#data-sources)
+4. [Repository Cloning and Setup](#repository-cloning-and-setup)
+5. [Dependencies](#dependencies)
+6. [Running the Application](#running-the-application)
+7. [Further Configuration](#further-configuration)
+8. [Contact](#contact)
 
 ---
 
-**Level up your Dota 2 experience with Dotact-AI – your proactive in-game coach and personal assistant!**
+## Project Description
+This project provides a **real-time, LLM-driven coaching system for Dota 2**. It leverages Valve’s Game State Integration (GSI) to fetch in-game data, processes that data, and then uses a Large Language Model to generate situational advice, item recommendations, and strategic insights during live matches. 
+
+The application showcases how advanced language models can interpret complex game states to give meaningful in-game guidance.
+
+---
+
+## Purpose and Features
+- **Real-Time Coaching**: Continuously listens to live game data (health, hero stats, items, etc.) and provides up-to-date suggestions.
+- **Hero & Item Insights**: References static data for all Dota 2 heroes and items to tailor recommended builds and strategies.
+- **Historical Trends**: Integrates historical match data (via external APIs like Stratz) to inform suggestions based on current meta.
+- **LLM Communication**: Uses prompt engineering to provide short, high-impact tips in a structured format.
+
+---
+
+## Data Sources
+The system uses three primary data types:
+
+1. **Live Data**  
+   - Provided via Valve’s GSI (Game State Integration).  
+   - GSI sends JSON updates with in-game stats (hero health, items, map info, etc.).
+
+2. **Static Data**  
+   - Pulled from the Liquipedia [Dota 2 wiki](https://liquipedia.net/dota2/Portal:Heroes).  
+   - Includes hero and item details (e.g., attributes, abilities, item costs, cooldowns).
+
+3. **Historical Data**  
+   - Gathered from [Stratz](https://stratz.com/) API using GraphQL.  
+   - Contains aggregated match stats and hero win rates to inform strategic decisions.
+
+> **Note**: The data sets are not directly included in this repository. You’ll need to configure your own GSI or supply your own API keys (e.g. for Stratz or other services) to fully leverage the historical data component.
+
+---
+
+## Repository Cloning and Setup
+1. **Clone this repository**:
+   ```bash
+   git clone https://github.com/sashank3/dotact-ai.git
+   cd dotact-ai
+   ```
+2. Ensure you have **Python 3.9+** (or your preferred version) available.
+
+---
+
+## Dependencies
+We recommend using [uv](https://pypi.org/project/uv/) to manage and sync the project’s dependencies. All necessary Python packages are declared in a `pyproject.toml` file, and the typical workflow is:
+
+1. **Install uv (if not installed)**:
+   ```bash
+   pip install uv
+   ```
+2. **Sync dependencies**:
+   ```bash
+   uv sync
+   ```
+   This will install packages based on the `pyproject.toml` and ensure the environment is up to date.
+
+---
+
+## Running the Application
+1. **Configure Environment Variables**  
+   - Create a `.env` file (or otherwise set environment variables) for your LLM API key and other secrets.  
+   - Example:
+     ```bash
+     NEBIUS_API_KEY="<your-api-key-here>"
+     ```
+   - Confirm or edit any paths in `gsi_config.yaml` and `llm_config.yaml` as needed.
+
+2. **Start the main script**:
+   ```bash
+   python main.py
+   ```
+   - This will:
+     1. Set up the GSI config and launch a local server to receive game data.  
+     2. Start a Chainlit-based UI where you can interact with the LLM in real time.
+
+3. **Launch Dota 2** (with GSI enabled)  
+   - Ensure the `gamestate_integration_custom.cfg` was successfully written to the correct Dota 2 config directory (as specified in `gsi_config.yaml`).
+   - Once in-game, the system will begin receiving data from the local GSI server.
+
+4. **Use the Chainlit UI**  
+   - Open your browser to the URL displayed in the console (typically `http://localhost:8000`) and ask the bot for item or strategy suggestions.
+
+---
+
+## Further Configuration
+- **Logging and Debugging**  
+  Logs are stored in the `logs` directory (configurable in `gsi_config.yaml`). You can adjust logging levels in `logger.py` or the YAML configurations.
+
+- **LLM Prompt Tuning**  
+  `prompt_builder.py` controls how queries are sent to the LLM. You can modify the system prompt or response format to suit your coaching style.
+
+- **Advanced Integrations**  
+  This project’s architecture allows easy extension with other data sources or additional LLM functionalities (e.g., RAG workflows, advanced chain-of-thought reasoning, etc.).
+
+---
+
+## Contact
+For questions, suggestions, or feedback, feel free to reach out or open an issue in the repository.
+
+**Enjoy your real-time LLM-based Dota 2 coaching experience!**
+

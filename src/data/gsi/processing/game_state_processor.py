@@ -1,77 +1,105 @@
+import logging
+
 def convert_game_state_to_text(game_state: dict) -> str:
     """
     Converts a raw game state dictionary into a more readable text format.
     """
-    if not game_state:
+    if not game_state or not any(game_state.values()):  # Check if state is empty or all fields empty
+        logging.warning("[GSI PROCESSOR] Received empty or invalid game state")
         return "No game state available."
 
-    # Extract key components
-    game_map = game_state.get("map", {})
-    player = game_state.get("player", {})
-    hero = game_state.get("hero", {})
-    abilities = game_state.get("abilities", {})
-    items = game_state.get("items", {})
-    buildings = game_state.get("buildings", {})
-    draft = game_state.get("draft", {})
-
-    # Build up text representation
     text_output = []
 
-    # Map info
-    text_output.append(
-        f"Map: {game_map.get('name', 'Unknown')}, "
-        f"Game State: {game_map.get('game_state', 'N/A')}, "
-        f"Time: {game_map.get('game_time', '0')}s"
-    )
+    try:
+        # Map info
+        game_map = game_state.get("map", {})
+        if game_map:
+            text_output.append(
+                f"Game State: {game_map.get('game_state', 'Unknown')}, "
+                f"Match ID: {game_map.get('matchid', 'Unknown')}, "
+                f"Game Time: {game_map.get('game_time', 0)}s, "
+                f"Score: {game_map.get('radiant_score', 0)} - {game_map.get('dire_score', 0)}"
+            )
 
-    # Player info
-    text_output.append(
-        f"Player: {player.get('name', 'Unknown')} "
-        f"[Gold: {player.get('gold', 0)}, "
-        f"K/D/A: {player.get('kills', 0)}/"
-        f"{player.get('deaths', 0)}/"
-        f"{player.get('assists', 0)}]"
-    )
+        # Player info
+        player = game_state.get("player", {})
+        if player:
+            text_output.append(
+                f"Player: {player.get('name', 'Unknown')} "
+                f"[Team: {player.get('team_name', 'Unknown')}, "
+                f"K/D/A: {player.get('kills', 0)}/{player.get('deaths', 0)}/{player.get('assists', 0)}, "
+                f"LH/DN: {player.get('last_hits', 0)}/{player.get('denies', 0)}, "
+                f"GPM/XPM: {player.get('gpm', 0)}/{player.get('xpm', 0)}]"
+            )
 
-    # Hero info
-    text_output.append(
-        f"Hero: {hero.get('name', 'Unknown')} "
-        f"[HP: {hero.get('health', 0)}/"
-        f"{hero.get('max_health', 0)}, "
-        f"Mana: {hero.get('mana', 0)}/"
-        f"{hero.get('max_mana', 0)}]"
-    )
+        # Hero info
+        hero = game_state.get("hero", {})
+        if hero:
+            text_output.append(
+                f"Hero: {hero.get('name', 'Unknown').replace('npc_dota_hero_', '')} "
+                f"[Level {hero.get('level', 0)}, "
+                f"HP: {hero.get('health', 0)}/{hero.get('max_health', 0)}, "
+                f"MP: {hero.get('mana', 0)}/{hero.get('max_mana', 0)}]"
+            )
 
-    # Abilities info
-    ability_texts = []
-    for _, ability_info in abilities.items():
-        ability_name = ability_info.get("name", "Unknown")
-        ability_level = ability_info.get("level", 0)
-        ability_cd = ability_info.get("cooldown", 0)
-        ability_texts.append(f"{ability_name}(Lv{ability_level}, CD={ability_cd})")
-    if ability_texts:
-        text_output.append(f"Abilities: {', '.join(ability_texts)}")
+        # Abilities
+        abilities = game_state.get("abilities", {})
+        if abilities:
+            ability_texts = []
+            for ability_key, ability_info in abilities.items():
+                name = ability_info.get("name", "Unknown").replace(f"{hero.get('name', 'Unknown').split('npc_dota_hero_')[-1]}_", "")
+                level = ability_info.get("level", 0)
+                cooldown = ability_info.get("cooldown", 0)
+                ability_texts.append(f"{name}(Lv{level}, CD:{cooldown})")
+            if ability_texts:
+                text_output.append(f"Abilities: {', '.join(ability_texts)}")
 
-    # Items info
-    item_names = []
-    for _, item_info in items.items():
-        item_name = item_info.get("name", "Unknown")
-        if item_name != "empty":
-            item_names.append(item_name)
-    if item_names:
-        text_output.append(f"Items: {', '.join(item_names)}")
+        # Items
+        items = game_state.get("items", {})
+        if items:
+            item_texts = []
+            for slot, item_info in items.items():
+                if isinstance(item_info, dict) and item_info.get("name") != "empty":
+                    name = item_info["name"].replace("item_", "")
+                    charges = item_info.get("charges", 0)
+                    item_text = f"{name}"
+                    if charges > 0:
+                        item_text += f"({charges})"
+                    item_texts.append(item_text)
+            if item_texts:
+                text_output.append(f"Items: {', '.join(item_texts)}")
 
-    # Buildings summary (example)
-    if buildings:
-        # If 'buildings' is a dict of building objects, just do a count or a minimal summary
-        text_output.append(f"Buildings: {len(buildings)} building entries")
+        # Buildings (only include if there are buildings)
+        buildings = game_state.get("buildings", {})
+        if buildings and any(buildings.values()):
+            for team, team_buildings in buildings.items():
+                building_texts = []
+                for building_name, building_info in team_buildings.items():
+                    health_percent = int((building_info.get("health", 0) / building_info.get("max_health", 1)) * 100)
+                    building_texts.append(f"{building_name}({health_percent}%)")
+                if building_texts:
+                    text_output.append(f"{team.capitalize()} Buildings: {', '.join(building_texts)}")
 
-    # Draft summary (example)
-    if draft:
-        # If 'draft' is a structure with picks/bans, you can parse them here
-        text_output.append(f"Draft info: {draft}")
+    except Exception as e:
+        logging.error(f"[GSI PROCESSOR] Error processing game state: {e}")
+        return "Error processing game state."
 
-    # Combine into a single readable string
-    formatted_text = "\n".join(text_output)
-    # logging.info(f"[GSI PREPROCESSOR] Formatted game state:\n{formatted_text}")
+    formatted_text = "\n".join(text_output) if text_output else "No valid game state data available."
+    logging.debug(f"[GSI PROCESSOR] Processed text: {formatted_text}")
     return formatted_text
+
+def extract_hero_name(game_state: dict) -> str:
+    """
+    Extracts the hero name from the game state dictionary.
+    Returns 'Unknown Hero' if hero name cannot be found.
+    """
+    if not game_state:
+        return "Unknown Hero"
+    
+    try:
+        hero = game_state.get("hero", {})
+        hero_name = hero.get("name", "Unknown Hero")
+        return hero_name
+    except Exception as e:
+        logging.warning(f"Could not extract hero name from game state: {e}")
+        return "Unknown Hero"

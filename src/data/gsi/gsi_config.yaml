@@ -1,13 +1,10 @@
 server:
   host: "127.0.0.1"
   port: 4000
+  log_interval: 60  # seconds between logging game state updates
 
 auth:
   token: "my_super_secret_token_123!"
-
-logging:
-  level: "INFO"
-  logs_dir: "logs"
 
 dota2:
   gsi_config_path: "C:/Program Files (x86)/Steam/steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration/gamestate_integration_custom.cfg"

@@ -12,6 +12,13 @@ CONFIG_FILES = {
     "llm": os.path.join(BASE_DIR, "src/llm/llm_config.yaml"),
 }
 
+# Global logging configuration
+LOGGING_CONFIG = {
+    "logs_dir": os.path.join(BASE_DIR, "logs"),
+    "level": "INFO",
+    "format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
+}
+
 
 def load_yaml_config(file_path):
     """Loads a YAML configuration file and returns its content as a dictionary."""

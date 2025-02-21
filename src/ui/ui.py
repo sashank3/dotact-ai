@@ -1,6 +1,6 @@
 import subprocess
 import logging
-from src.logger import setup_logging
+from src.logger.logger import setup_logging
 
 
 def start_ui():

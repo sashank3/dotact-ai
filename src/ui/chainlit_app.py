@@ -1,6 +1,12 @@
 import chainlit as cl
 import datetime
-from src.data.gsi.gsi import get_processed_gsi_data
+import sys
+import os
+import logging
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from src.data.gsi.gsi import get_processed_gsi_data, get_raw_gsi_data
+from src.data.gsi.processing.game_state_processor import extract_hero_name
 from src.llm.llm import LLMOrchestrator
 from src.ui.components.history_manager import save_chat_history, load_chat_history
 
@@ -19,9 +25,17 @@ async def on_chat_start():
 @cl.on_message
 async def on_message(message):
     user_query = message.content
+    logging.info("[CHAINLIT] Received user query: %s", user_query)
 
-    # 1) Grab the current game state
-    game_state_text = get_processed_gsi_data()
+    # 1) Grab the current game state and hero name
+    current_state = get_raw_gsi_data()  # Get raw state directly
+    game_state_text = get_processed_gsi_data()  # Get processed text
+    
+    hero_name = extract_hero_name(current_state) if current_state else "Unknown Hero"
+    
+    logging.info("[CHAINLIT] Current game state: %s", current_state)
+    logging.info("[CHAINLIT] Processed game state text: %s", game_state_text)
+    logging.info("[CHAINLIT] Extracted hero name: %s", hero_name)
 
     # 2) We want to stream tokens as they arrive
     token_stream = llm_orch.get_llm_response(user_query, game_state_text, stream=True)
@@ -40,12 +54,13 @@ async def on_message(message):
         full_text += chunk
         await final_msg.stream_token(chunk)
 
-    # 6) Optionally, save the final text to your history
+    # 6) Save the final text to history with hero information
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     chat_entry = {
         "timestamp": timestamp,
-        "hero": "Unknown Hero",  # or fetch from game_state
+        "hero": hero_name,
         "query": user_query,
         "response": full_text
     }
+    logging.info("[CHAINLIT] Saving chat entry: %s", chat_entry)
     save_chat_history(chat_entry)

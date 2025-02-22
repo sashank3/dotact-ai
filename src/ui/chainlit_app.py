@@ -3,8 +3,10 @@ import datetime
 import sys
 import os
 import logging
+import json
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from src.global_config import GLOBAL_CONFIG
 from src.data.gsi.gsi import get_processed_gsi_data, get_raw_gsi_data
 from src.data.gsi.processing.game_state_processor import extract_hero_name
 from src.llm.llm import LLMOrchestrator
@@ -27,9 +29,15 @@ async def on_message(message):
     user_query = message.content
     logging.info("[CHAINLIT] Received user query: %s", user_query)
 
-    # 1) Grab the current game state and hero name
-    current_state = get_raw_gsi_data()  # Get raw state directly
-    game_state_text = get_processed_gsi_data()  # Get processed text
+    # 1) Read state from file instead of memory
+    current_state = None
+    try:
+        with open(GLOBAL_CONFIG["data"]["gsi"]["state_file_path"], 'r') as f:
+            current_state = json.load(f)
+    except Exception as e:
+        logging.warning(f"[CHAINLIT] Error loading game state: {e}")
+    
+    game_state_text = get_processed_gsi_data()
     
     hero_name = extract_hero_name(current_state) if current_state else "Unknown Hero"
     

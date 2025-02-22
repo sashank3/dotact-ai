@@ -1,53 +1,76 @@
-"""Simple state manager using events to handle game state updates"""
+"""File-based state manager for cross-process access"""
 import logging
-import time
-from typing import Dict, Optional, Callable
+import json
+import os
+from typing import Optional, Dict
 from threading import Lock
-from src.global_config import GLOBAL_CONFIG
+from src.global_config import GLOBAL_CONFIG, BASE_DIR
+import time
+import datetime
+from src.logger.log_manager import log_manager  # Add this import
 
-class StateManager:
+class StateLogger:
     def __init__(self):
-        self._state: Optional[Dict] = None
-        self._lock = Lock()
-        self._subscribers: list[Callable] = []
-        self._last_log_time = 0
-        self._log_interval = GLOBAL_CONFIG["data"]["gsi"]["server"]["log_interval"]
+        self.last_log = 0
+        self.interval = GLOBAL_CONFIG["data"]["gsi"]["server"]["log_interval"]
+        self.log_dir = log_manager.session_dir  # Use the session directory
         
-    def should_log(self) -> bool:
-        """Check if we should log based on interval"""
+    def should_log(self):
         current_time = time.time()
-        if current_time - self._last_log_time >= self._log_interval:
-            self._last_log_time = current_time
+        if current_time - self.last_log >= self.interval:
+            self.last_log = current_time
             return True
         return False
 
+    def log_state(self, state):
+        if not state:
+            return
+            
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = os.path.join(self.log_dir, f"gsi_state_{timestamp}.json")
+            
+            with open(log_file, 'w') as f:
+                json.dump(state, f, indent=2)
+                
+            logging.info(f"[STATE LOGGER] Saved state snapshot to {log_file}")
+        except Exception as e:
+            logging.error(f"[STATE LOGGER] Error saving state: {e}")
+
+class StateManager:
+    def __init__(self):
+        self._lock = Lock()
+        self._state_file = os.path.join(BASE_DIR, GLOBAL_CONFIG["data"]["gsi"]["storage"]["state_file"])
+        self.logger = StateLogger()
+        
     def update_state(self, new_state: Dict) -> None:
-        """Update state and notify subscribers"""
+        """Save state directly to file"""
         with self._lock:
             if new_state and any(new_state.values()):
-                self._state = new_state
-                if self.should_log():
-                    logging.info("[STATE MANAGER] State updated: %s", new_state)
-                self._notify_subscribers()
+                try:
+                    logging.debug(f"Saving to: {self._state_file}")  # Add path logging
+                    os.makedirs(os.path.dirname(self._state_file), exist_ok=True)
+                    with open(self._state_file, 'w') as f:
+                        json.dump(new_state, f)
+                    logging.debug("State saved successfully")
+                    
+                    # Periodic logging
+                    if self.logger.should_log():
+                        self.logger.log_state(new_state)
+                except Exception as e:
+                    logging.error(f"[STATE MANAGER] Error saving state: {e}")
 
     def get_state(self) -> Optional[Dict]:
-        """Get current state"""
+        """Read state directly from file"""
         with self._lock:
-            if self.should_log():
-                logging.info("[STATE MANAGER] Current state: %s", self._state)
-            return self._state
-
-    def subscribe(self, callback: Callable) -> None:
-        """Add subscriber to state updates"""
-        self._subscribers.append(callback)
-
-    def _notify_subscribers(self) -> None:
-        """Notify all subscribers of state update"""
-        for callback in self._subscribers:
             try:
-                callback(self._state)
+                if os.path.exists(self._state_file):
+                    with open(self._state_file, 'r') as f:
+                        return json.load(f)
+                return None
             except Exception as e:
-                logging.error(f"[STATE MANAGER] Error notifying subscriber: {e}")
+                logging.error(f"[STATE MANAGER] Error loading state: {e}")
+                return None
 
 # Global instance
 state_manager = StateManager() 

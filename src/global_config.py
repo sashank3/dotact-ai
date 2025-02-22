@@ -10,6 +10,7 @@ CONFIG_FILES = {
         "gsi": os.path.join(BASE_DIR, "src/data/gsi/gsi_config.yaml"),
     },
     "llm": os.path.join(BASE_DIR, "src/llm/llm_config.yaml"),
+    "ui": os.path.join(BASE_DIR, "src/ui/ui_config.yaml")
 }
 
 # Global logging configuration

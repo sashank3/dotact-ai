@@ -3,13 +3,11 @@ import uvicorn
 import time
 from fastapi import FastAPI
 from pydantic import BaseModel
-from src.data.gsi.extraction.game_state import GameStateManager
 from src.global_config import GLOBAL_CONFIG
 from src.data.gsi.extraction.state_manager import state_manager
 
 # Initialize FastAPI app
 app = FastAPI()
-game_state_manager = GameStateManager()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -48,14 +46,10 @@ async def receive_game_state(update: GameStateUpdate):
     """Receives and stores game state updates from Dota 2."""
     state_dict = update.dict()
     if not any(state_dict.values()):
-        if logging_state.should_log():
-            logging.warning("[GSI SERVER] Received empty update")
+        logging.debug("[GSI SERVER] Received empty update")
         return {"status": "empty"}
-
-    # Log the state update with rate limiting
-    if logging_state.should_log():
-        logging.info("[GSI SERVER] Received state update: %s", state_dict)
     
+    logging.debug("[GSI SERVER] Received state update")
     state_manager.update_state(state_dict)
     return {"status": "received"}
 
@@ -68,15 +62,16 @@ def start_gsi_server():
     """
     Starts the FastAPI server (single-threaded) with modified logging settings.
     """
-    logging.info("[GSI SERVER] Starting FastAPI server...")
-
+    logging.info(f"Starting server on port 4000")
+    logging.info(f"GSI config path: {GLOBAL_CONFIG['data']['gsi']['dota2']['gsi_config_path']}")
+    
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"  # Suppress request logs
 
     uvicorn.run(
-        app, 
-        host="127.0.0.1", 
-        port=4000, 
+        app,
+        host="127.0.0.1",
+        port=4000,
         log_config=log_config,
-        workers=1  # Ensure single worker
+        workers=1
     )

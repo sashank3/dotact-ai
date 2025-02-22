@@ -11,6 +11,7 @@ def gsi_file_setup():
     try:
         # 🔹 Get the actual file path from the config
         gsi_config_path = GLOBAL_CONFIG["data"]["gsi"]["dota2"]["gsi_config_path"]
+        logging.info(f"Creating GSI config at: {gsi_config_path}")
 
         # 🔹 Ensure the directory exists
         os.makedirs(os.path.dirname(gsi_config_path), exist_ok=True)
@@ -42,7 +43,8 @@ def gsi_file_setup():
         with open(gsi_config_path, "w") as dota_config_file:
             dota_config_file.write(dota_config_content)
 
-        logging.info(f'GSI configuration successfully written to: {gsi_config_path}')
+        logging.info(f"GSI config created successfully")
 
     except Exception as e:
-        logging.error(f"Failed to set up GSI configuration: {e}")
+        logging.error(f"GSI config creation failed: {e}")
+        raise  # Add this to see the error

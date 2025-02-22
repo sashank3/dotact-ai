@@ -171,3 +171,5 @@ cython_debug/
 .pypirc
 /src/.chainlit
 src/chat_history.json
+/data
+chainlit.md

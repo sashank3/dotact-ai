@@ -1,15 +1,19 @@
 import logging
 
-def convert_game_state_to_text(game_state: dict) -> str:
+def convert_game_state_to_text(game_state: dict) -> tuple[str, str]:
     """
-    Converts a raw game state dictionary into a more readable text format.
+    Converts a raw game state dictionary into a readable text format and extracts hero name.
+    Returns (formatted_text, hero_name)
     """
-    if not game_state or not any(game_state.values()):  # Check if state is empty or all fields empty
+    if not game_state or not any(game_state.values()):
         logging.warning("[GSI PROCESSOR] Received empty or invalid game state")
-        return "No game state available."
+        return "No game state available.", "Unknown Hero"
+
+    # Extract hero name first
+    hero = game_state.get("hero", {})
+    hero_name = hero.get("name", "Unknown Hero").replace("npc_dota_hero_", "")
 
     text_output = []
-
     try:
         # Map info
         game_map = game_state.get("map", {})
@@ -82,24 +86,8 @@ def convert_game_state_to_text(game_state: dict) -> str:
 
     except Exception as e:
         logging.error(f"[GSI PROCESSOR] Error processing game state: {e}")
-        return "Error processing game state."
+        return "Error processing game state.", hero_name
 
     formatted_text = "\n".join(text_output) if text_output else "No valid game state data available."
     logging.debug(f"[GSI PROCESSOR] Processed text: {formatted_text}")
-    return formatted_text
-
-def extract_hero_name(game_state: dict) -> str:
-    """
-    Extracts the hero name from the game state dictionary.
-    Returns 'Unknown Hero' if hero name cannot be found.
-    """
-    if not game_state:
-        return "Unknown Hero"
-    
-    try:
-        hero = game_state.get("hero", {})
-        hero_name = hero.get("name", "Unknown Hero")
-        return hero_name
-    except Exception as e:
-        logging.warning(f"Could not extract hero name from game state: {e}")
-        return "Unknown Hero"
+    return formatted_text, hero_name

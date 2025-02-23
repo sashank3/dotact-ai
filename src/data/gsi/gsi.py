@@ -3,8 +3,7 @@ import threading
 from src.data.gsi.server.gsi_server import start_gsi_server
 from src.logger.logger import setup_logging
 from src.data.gsi.extraction.gsi_file_setup import gsi_file_setup
-from src.data.gsi.processing.gsi_data_provider import get_current_state, get_processed_state
-from typing import Optional, Dict
+from src.data.gsi.processing.gsi_data_provider import get_processed_state
 
 def gsi_orchestrator():
     """Sets up GSI config and starts the FastAPI server in a background thread."""
@@ -22,9 +21,3 @@ def gsi_orchestrator():
     server_thread.start()
 
     logging.info("[GSI ORCHESTRATOR] GSI server launched in the background.")
-
-def get_processed_gsi_data() -> str:
-    return get_processed_state()
-
-def get_raw_gsi_data() -> Optional[Dict]:
-    return get_current_state()

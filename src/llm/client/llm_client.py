@@ -1,6 +1,5 @@
 import os
 import logging
-import re
 from openai import OpenAI
 from src.global_config import GLOBAL_CONFIG
 
@@ -8,7 +7,6 @@ from src.global_config import GLOBAL_CONFIG
 class LLMClient:
     """
     A client that interacts with the Nebius-based OpenAI-compatible API (DeepSeek R1).
-    Manages streaming and parsing of responses to remove <think> sections.
     """
 
     def __init__(self):
@@ -28,56 +26,25 @@ class LLMClient:
         )
 
     def generate_text(self, messages, stream=False, **kwargs):
-        """
-        Calls the LLM API with a chat completion request.
-        If stream=True, returns a generator of tokens (str), skipping <think> content.
-        Otherwise, returns a plain string with <think> removed.
-        """
-        params = {**self.default_params, **kwargs}
-
-        logging.info("[LLM CLIENT] Sending chat completion request with params: %s", params)
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            stream=stream,
-            **params
-        )
-
-        if stream:
-            return self._handle_streaming(response)
-        else:
-            return self._parse_response(response)
-
-    def _parse_response(self, response):
-        """Parses a non-streaming response and removes <think> sections."""
-        # 'response.choices[0].message.content' is a string
-        raw_text = response.choices[0].message.content or ""
-        # Remove <think> ... </think> blocks
-        text_no_think = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL)
-        return text_no_think.strip()
-
-    def _handle_streaming(self, response):
-        """
-        Handles streaming responses while skipping <think> sections.
-        Yields only the final text chunks.
-        """
-        inside_think = False
-
-        for chunk in response:
-            if not chunk.choices:
-                continue
-
-            # The current token fragment
-            text = chunk.choices[0].delta.content if chunk.choices[0].delta.content else ""
-
-            # If <think> appears, start ignoring
-            if "<think>" in text:
-                inside_think = True
-            # If </think> appears, stop ignoring
-            if "</think>" in text:
-                inside_think = False
-                # Remove everything up to and including </think> from this chunk
-                text = text.split("</think>", 1)[-1]
-
-            if not inside_think and text:
-                yield text
+        """Calls the LLM API with a chat completion request."""
+        try:
+            params = {**self.default_params, **kwargs}
+            
+            logging.info("[LLM CLIENT] Sending API request")
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=stream,
+                **params
+            )
+            
+            if not response or not response.choices:
+                logging.error("[LLM CLIENT] Empty response from API")
+                return ""
+            
+            content = response.choices[0].message.content
+            return content or ""
+            
+        except Exception as e:
+            logging.error(f"[LLM CLIENT] Error generating response: {str(e)}")
+            raise

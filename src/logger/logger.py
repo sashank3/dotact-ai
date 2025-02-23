@@ -4,7 +4,6 @@ import logging
 import os
 from src.global_config import GLOBAL_CONFIG
 
-
 def setup_logging(log_file="app.log", level=logging.INFO):
     """
     Configures logging for the entire app with a single function.
@@ -38,3 +37,4 @@ def setup_logging(log_file="app.log", level=logging.INFO):
     logger.addHandler(console_handler)
 
     logging.info("Unified logging setup complete.")
+

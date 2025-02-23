@@ -9,5 +9,4 @@ auth:
 dota2:
   gsi_config_path: "C:/Program Files (x86)/Steam/steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration/gamestate_integration_custom.cfg"
 
-storage:
-  state_file: "data/game_state.json"
+state_file: "data/game_state.json"

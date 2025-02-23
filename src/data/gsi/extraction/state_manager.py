@@ -7,13 +7,13 @@ from threading import Lock
 from src.global_config import GLOBAL_CONFIG, BASE_DIR
 import time
 import datetime
-from src.logger.log_manager import log_manager  # Add this import
+from src.logger.log_manager import log_manager
 
 class StateLogger:
     def __init__(self):
         self.last_log = 0
         self.interval = GLOBAL_CONFIG["data"]["gsi"]["server"]["log_interval"]
-        self.log_dir = log_manager.session_dir  # Use the session directory
+        self.log_dir = os.environ["SESSION_DIR"]
         
     def should_log(self):
         current_time = time.time()
@@ -28,7 +28,8 @@ class StateLogger:
             
         try:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = os.path.join(self.log_dir, f"gsi_state_{timestamp}.json")
+            session_dir = os.environ["SESSION_DIR"]
+            log_file = os.path.join(session_dir, f"gsi_state_{timestamp}.json")
             
             with open(log_file, 'w') as f:
                 json.dump(state, f, indent=2)
@@ -40,7 +41,7 @@ class StateLogger:
 class StateManager:
     def __init__(self):
         self._lock = Lock()
-        self._state_file = os.path.join(BASE_DIR, GLOBAL_CONFIG["data"]["gsi"]["storage"]["state_file"])
+        self._state_file = os.path.join(BASE_DIR, GLOBAL_CONFIG["data"]["gsi"]["state_file"])
         self.logger = StateLogger()
         
     def update_state(self, new_state: Dict) -> None:

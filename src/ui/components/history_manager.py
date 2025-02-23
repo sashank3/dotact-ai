@@ -1,11 +1,16 @@
 import json
 import logging
+import os
 from src.logger.log_manager import log_manager
 
 def save_chat_history(chat_entry: dict) -> None:
     """Save a chat entry to the session's chat history file."""
     history_file = log_manager.get_chat_history_path()
     try:
+        # Ensure directory exists
+        history_dir = os.path.dirname(history_file)
+        os.makedirs(history_dir, exist_ok=True)
+        
         # Load existing history
         try:
             with open(history_file, 'r') as f:
@@ -23,6 +28,7 @@ def save_chat_history(chat_entry: dict) -> None:
         logging.debug(f"[HISTORY MANAGER] Saved chat entry to {history_file}")
     except Exception as e:
         logging.error(f"[HISTORY MANAGER] Error saving chat history: {e}")
+        logging.error(f"[HISTORY MANAGER] Path attempted: {history_file}")
 
 def load_chat_history() -> list:
     """Load chat history from the session's history file."""

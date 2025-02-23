@@ -173,3 +173,5 @@ cython_debug/
 src/chat_history.json
 /data
 chainlit.md
+/logs
+/.chainlit

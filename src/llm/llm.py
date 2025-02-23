@@ -12,21 +12,19 @@ class LLMOrchestrator:
         self.client = LLMClient()
 
     def get_llm_response(self, user_query: str, context_data: str, stream=False):
-        """
-        Build the prompt and get a response from the LLM.
-        If stream=True, returns a generator of tokens (strings).
-        Otherwise, returns a single string.
-        """
-        logging.info("[LLM ORCHESTRATOR] Processing query: %s", user_query)
-        logging.info("[LLM ORCHESTRATOR] With context: %s", context_data)
-
-        messages = build_prompt(user_query, context_data)
-        logging.info("[LLM ORCHESTRATOR] Built messages: %s", messages)
-
-        logging.info("[LLM ORCHESTRATOR] Sending chat completion request...")
-        result = self.client.generate_text(messages, stream=stream)
-
-        if not stream:
-            logging.info("[LLM ORCHESTRATOR] Generated response: %s", result)
+        """Get complete LLM response in one call"""
         
-        return result
+        messages = build_prompt(user_query, context_data)
+        response = self.client.generate_text(messages, stream=stream)
+        
+        if not response:
+            logging.error("[LLM ORCHESTRATOR] Received empty response from LLM")
+            return "I apologize, but I couldn't generate a response at this time."
+            
+        # Remove thinking notes if present
+        if "<think>" in response and "</think>" in response:
+            response = response.split("</think>")[1].strip()
+            
+        logging.info("[LLM ORCHESTRATOR] Response preview: %s...", response[:200])
+        
+        return response.strip()

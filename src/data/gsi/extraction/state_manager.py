@@ -8,6 +8,7 @@ from src.global_config import GLOBAL_CONFIG, BASE_DIR
 import time
 import datetime
 from src.logger.log_manager import log_manager
+from src.data.gsi.extraction.hero_extractor import extract_hero_lists
 
 class StateLogger:
     def __init__(self):
@@ -43,23 +44,46 @@ class StateManager:
         self._lock = Lock()
         self._state_file = os.path.join(BASE_DIR, GLOBAL_CONFIG["data"]["gsi"]["state_file"])
         self.logger = StateLogger()
+        self.ally_heroes = set()
+        self.enemy_heroes = set()
+        self.current_match_id = None
+        self.heroes_tracked = False
         
     def update_state(self, new_state: Dict) -> None:
-        """Save state directly to file"""
+        """Save state directly to file and track heroes."""
         with self._lock:
-            if new_state and any(new_state.values()):
-                try:
-                    logging.debug(f"Saving to: {self._state_file}")  # Add path logging
-                    os.makedirs(os.path.dirname(self._state_file), exist_ok=True)
-                    with open(self._state_file, 'w') as f:
-                        json.dump(new_state, f)
-                    logging.debug("State saved successfully")
-                    
-                    # Periodic logging
-                    if self.logger.should_log():
-                        self.logger.log_state(new_state)
-                except Exception as e:
-                    logging.error(f"[STATE MANAGER] Error saving state: {e}")
+            if not new_state or not any(new_state.values()):
+                return
+
+            map_data = new_state.get("map", {})
+            match_id = map_data.get("matchid")
+
+            # Reset hero tracking if match ID changes
+            if match_id != self.current_match_id:
+                self.ally_heroes = set()
+                self.enemy_heroes = set()
+                self.current_match_id = match_id
+                self.heroes_tracked = False
+                logging.info(f"[STATE MANAGER] Match ID changed, resetting hero lists. New Match ID: {match_id}")
+
+            if not self.heroes_tracked:
+                extract_hero_lists(new_state, self)
+
+            # Add ally_heroes and enemy_heroes to the state before saving
+            new_state["allies"] = list(self.ally_heroes)
+            new_state["enemies"] = list(self.enemy_heroes)
+
+            try:
+                logging.debug(f"Saving to: {self._state_file}")
+                os.makedirs(os.path.dirname(self._state_file), exist_ok=True)
+                with open(self._state_file, 'w') as f:
+                    json.dump(new_state, f)
+                logging.debug("State saved successfully")
+                
+                if self.logger.should_log():
+                    self.logger.log_state(new_state)
+            except Exception as e:
+                logging.error(f"[STATE MANAGER] Error saving state: {e}")
 
     def get_state(self) -> Optional[Dict]:
         """Read state directly from file"""

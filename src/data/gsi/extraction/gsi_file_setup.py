@@ -29,6 +29,7 @@ def gsi_file_setup():
     }}
     "data"
     {{
+        "provider"      "1"
         "map"           "1"
         "player"        "1"
         "hero"          "1"
@@ -36,6 +37,7 @@ def gsi_file_setup():
         "items"         "1"
         "buildings"     "1"
         "draft"         "1"
+        "minimap"       "1"
     }}
 }}
 """
@@ -47,4 +49,4 @@ def gsi_file_setup():
 
     except Exception as e:
         logging.error(f"GSI config creation failed: {e}")
-        raise  # Add this to see the error
+        raise  # Add this to see the error"

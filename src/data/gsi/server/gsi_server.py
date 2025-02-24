@@ -32,7 +32,7 @@ class LoggingState:
 logging_state = LoggingState()
 
 class GameStateUpdate(BaseModel):
-    """Schema for receiving game state updates."""
+    provider: dict = {}
     map: dict = {}
     player: dict = {}
     hero: dict = {}
@@ -40,6 +40,8 @@ class GameStateUpdate(BaseModel):
     items: dict = {}
     buildings: dict = {}
     draft: dict = {}
+    minimap: dict = {}
+
 
 @app.post("/")
 async def receive_game_state(update: GameStateUpdate):

@@ -3,6 +3,7 @@ import datetime
 import sys
 import os
 import logging
+from typing import Dict, Optional
 
 # Make sure Python can find src/...
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -14,19 +15,21 @@ from src.ui.components.history_manager import save_chat_history, load_chat_histo
 
 llm_orch = LLMOrchestrator()
 
+# Get the authenticated user from environment variables
+current_user = os.getenv("KEENMIND_USER", "Anonymous")
+
 @cl.on_chat_start
 async def start():
     """Initialize chat and load past sessions."""
     cl.user_session.set("chat_history", load_chat_history())
     await cl.Message(
-        content="🎮 Welcome to KeenMind, your Dota 2 Assistant! Ask me anything."
+        content=f"🎮 Welcome to KeenMind, {current_user}! Ask me anything about your Dota 2 game."
     ).send()
 
 @cl.on_message
 async def on_message(message: cl.Message):
-
     user_query = message.content
-    logging.info("[CHAINLIT] Received user query: %s", user_query)
+    logging.info(f"[CHAINLIT] Received user query from {current_user}: {user_query}")
 
     # Get processed game state and hero name from data provider
     game_state_text, hero_name = get_processed_state()
@@ -52,6 +55,7 @@ async def on_message(message: cl.Message):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         chat_entry = {
             "timestamp": timestamp,
+            "user": current_user,
             "hero": hero_name,
             "query": user_query,
             "game_state": game_state_text,

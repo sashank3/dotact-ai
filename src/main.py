@@ -6,22 +6,23 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def main():
-    # Initialize FIRST and only once
+    # Load environment variables FIRST
+    load_dotenv()
+    
+    # Initialize logging SECOND
     from src.logger.log_manager import log_manager  # ← Triggers initialization
     
     # Start components AFTER setting SESSION_DIR
     from src.data.gsi.gsi import gsi_orchestrator
-    from src.ui.ui import start_ui
+    from src.gsi.server import run_server
     
-    load_dotenv()
-    
-    # Initialize logging FIRST
     logging.info("[MAIN] Starting GSI pipeline...")
     gsi_orchestrator()
     
-    logging.info("[MAIN] Starting UI...")
-    start_ui()
+    logging.info("[MAIN] Starting server...")
+    run_server()
 
 
 if __name__ == "__main__":
     main()
+                                          

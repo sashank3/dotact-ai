@@ -175,3 +175,8 @@ src/chat_history.json
 chainlit.md
 /logs
 /.chainlit
+
+# CDK Infra
+infra/cdk.out/
+infra/node_modules/
+

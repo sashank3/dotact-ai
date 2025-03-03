@@ -1,6 +1,0 @@
-api_key: "None"  # Will be overridden by ENV variable
-base_url: "https://api.studio.nebius.ai/v1/"
-model_name: "deepseek-ai/DeepSeek-R1"
-default_params:
-  max_tokens: 4096
-  temperature: 0.7

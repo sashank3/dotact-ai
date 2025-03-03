@@ -1,6 +1,6 @@
 server:
   host: "127.0.0.1"
-  port: 4000
+  port: 8002
   log_interval: 60
 
 auth:

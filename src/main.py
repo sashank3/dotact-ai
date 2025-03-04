@@ -8,9 +8,6 @@ from dotenv import load_dotenv
 # Add src to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import global configuration
-from src.global_config import GLOBAL_CONFIG, LOGGING_CONFIG
-
 def setup_environment():
     """Set up the environment by loading environment variables."""
     load_dotenv()

@@ -73,6 +73,7 @@ try:
     AUTH_PORT = AUTH_CONFIG.get("port", 8000)
     AUTH_REDIRECT_URI = AUTH_CONFIG.get("redirect_uri", "http://localhost:8000/callback")
     AUTH_SESSION_MAX_AGE = AUTH_CONFIG.get("session_max_age", 60 * 60 * 24 * 7)  # 1 week default
+    AUTH_TOKEN_FILE = AUTH_CONFIG.get("token_file", "data/auth_token.json")
     
     # GSI configuration
     GSI_CONFIG_PATH = GSI_CONFIG.get("dota2", {}).get("gsi_config_path", "gamestate_integration_dotact.cfg")
@@ -98,6 +99,7 @@ except Exception as e:
     AUTH_PORT = 8000
     AUTH_REDIRECT_URI = "http://localhost:8000/callback"
     AUTH_SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 1 week
+    AUTH_TOKEN_FILE = "data/auth_token.json"
     GSI_CONFIG_PATH = "gamestate_integration_dotact.cfg"
     STATE_FILE_PATH = "data/game_state.json"
     GSI_HOST = "127.0.0.1"

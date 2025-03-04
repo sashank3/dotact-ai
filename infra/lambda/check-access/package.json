@@ -1,0 +1,14 @@
+{
+  "name": "check-access-lambda",
+  "version": "1.0.0",
+  "description": "Custom authorizer for API Gateway",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "jwks-rsa": "^3.0.1"
+  }
+} 

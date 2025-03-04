@@ -7,11 +7,16 @@ import base64
 from botocore.exceptions import ClientError
 import traceback
 import datetime
+from typing import Dict, Any, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Initialize AWS clients
+secrets_manager = boto3.client('secretsmanager')
+cognito = boto3.client('cognito-idp')
 
 def get_secret(secret_name):
     """Retrieve a secret from AWS Secrets Manager"""
@@ -318,64 +323,71 @@ def build_prompt(user_query, game_state_text):
         }
     ]
 
-def get_llm_response(query, game_state_text):
-    """Generate a response using the Nebius LLM API"""
+def get_llm_response(query, game_state, user_info, api_key):
+    """
+    Get a response from the LLM model using the OpenAI API.
+    
+    Args:
+        query: The user's query text
+        game_state: The current game state
+        user_info: User information
+        api_key: The OpenAI API key
+        
+    Returns:
+        The LLM's response as a string
+    """
     try:
-        # Get API key from Secrets Manager
-        secrets = get_secret(os.environ.get('LLM_SECRET_NAME', 'keenmind/LLMCredentials'))
-        api_key = secrets.get('API_KEY')
+        # Extract relevant game state information
+        hero_name = game_state.get('hero', {}).get('name', 'Unknown')
+        game_time = game_state.get('map', {}).get('game_time', 0)
         
-        if not api_key:
-            logger.error("No API key found in secrets")
-            return "Error: LLM API key not configured properly."
+        # Format game time as MM:SS
+        minutes = int(game_time) // 60
+        seconds = int(game_time) % 60
+        formatted_time = f"{minutes}:{seconds:02d}"
         
-        # Build the prompt using the prompt builder
-        messages = build_prompt(query, game_state_text)
+        # Create a prompt with context
+        prompt = f"""
+User: {user_info.get('name', 'Anonymous')}
+Query: {query}
+
+Game Context:
+- Hero: {hero_name}
+- Game Time: {formatted_time}
+- Items: {json.dumps(game_state.get('items', {}))}
+
+Please provide a helpful, accurate response to the query based on the game context.
+"""
         
-        # Use Nebius API
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        # Nebius API endpoint
-        nebius_endpoint = "https://llm.api.cloud.nebius.ai/v1/chat/completions"
-        
-        logger.info(f"Sending request to Nebius API with query: {query}")
-        
-        payload = {
-            "messages": messages,
-            "model": "yandex/yandexgpt",
-            "temperature": 0.7,
-            "max_tokens": 1000
-        }
-        
+        # Call OpenAI API
         response = requests.post(
-            nebius_endpoint,
-            headers=headers,
-            json=payload,
-            timeout=25  # Set timeout to avoid Lambda timeout issues
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            },
+            json={
+                "model": "gpt-4o",
+                "messages": [
+                    {"role": "system", "content": "You are a Dota 2 assistant that helps players with game-related questions."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 500
+            },
+            timeout=25  # Set timeout to prevent Lambda timeout
         )
         
-        if response.status_code != 200:
-            logger.error(f"Nebius API error: {response.status_code} - {response.text}")
-            return f"Error from LLM API: {response.status_code}"
+        response.raise_for_status()
+        result = response.json()
         
-        response_json = response.json()
-        logger.info("Successfully received response from Nebius API")
+        # Extract the completion text
+        completion = result['choices'][0]['message']['content']
+        return completion
         
-        # Extract the content from the response
-        return response_json['choices'][0]['message']['content']
-        
-    except requests.exceptions.Timeout:
-        logger.error("Request to Nebius API timed out")
-        return "Error: LLM request timed out. Please try again."
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error: {e}")
-        return f"Error connecting to LLM API: {str(e)}"
     except Exception as e:
-        logger.error(f"Error generating LLM response: {e}")
-        return f"Error generating response: {str(e)}"
+        logger.error(f"Error calling LLM service: {str(e)}")
+        return "I'm sorry, I encountered an error while processing your request. Please try again."
 
 def process_query(query, game_state, user_info):
     """
@@ -412,11 +424,11 @@ def process_query(query, game_state, user_info):
             }
         
         # Construct prompt for the LLM
-        prompt = construct_prompt(query, game_state_summary, user_info)
+        prompt = construct_prompt(query, game_state_summary)
         print(f"Constructed prompt of length: {len(prompt)}")
         
         # Call the LLM API
-        llm_response = call_llm_api(prompt, llm_api_key)
+        llm_response = get_llm_response(query, game_state, user_info, llm_api_key)
         
         # Check for errors in LLM response
         if "error" in llm_response:
@@ -622,14 +634,13 @@ def get_api_key_from_secrets():
             
         return None
 
-def construct_prompt(query, game_state_summary, user_info):
+def construct_prompt(query, game_state_summary):
     """
     Construct a prompt for the LLM based on the query and game state.
     
     Args:
         query (str): The user's query
         game_state_summary (dict): Summary of the game state
-        user_info (dict): Information about the user
         
     Returns:
         str: The constructed prompt
@@ -742,74 +753,6 @@ def format_game_state_for_prompt(game_state_summary):
     # Combine all sections
     return "\n\n".join(sections)
 
-def call_llm_api(prompt, api_key):
-    """
-    Call the LLM API with the constructed prompt.
-    
-    Args:
-        prompt (str): The prompt for the LLM
-        api_key (str): The API key for the LLM
-        
-    Returns:
-        dict: The LLM response
-    """
-    try:
-        if not api_key:
-            print("No API key available")
-            return {"error": "No API key available"}
-        
-        # Set up the API request
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-        
-        # Configure for DeepSeek R1 model
-        base_url = "https://api.studio.nebius.ai/v1/"
-        model_name = "deepseek-ai/DeepSeek-R1"
-        
-        # Prepare messages in the format expected by DeepSeek R1
-        messages = [
-            {"role": "system", "content": "You are Keenmind, a helpful Dota 2 assistant that provides accurate and concise advice based on the current game state."},
-            {"role": "user", "content": prompt}
-        ]
-        
-        # Set default parameters
-        params = {
-            "model": model_name,
-            "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 2048,
-            "stream": False
-        }
-        
-        # Make the API request
-        endpoint = f"{base_url}chat/completions"
-        print(f"Calling LLM API at: {endpoint}")
-        print(f"Using model: {model_name}")
-        
-        response = requests.post(
-            endpoint,
-            headers=headers,
-            json=params,
-            timeout=60  # Increased timeout for longer responses
-        )
-        
-        # Check for errors
-        if response.status_code != 200:
-            error_message = f"LLM API error: {response.status_code} - {response.text}"
-            print(error_message)
-            return {"error": error_message}
-        
-        # Parse the response
-        return response.json()
-        
-    except Exception as e:
-        error_message = f"Error calling LLM API: {str(e)}"
-        print(error_message)
-        print(traceback.format_exc())
-        return {"error": error_message}
-
 def process_llm_response(llm_response):
     """
     Process and format the LLM response.
@@ -845,61 +788,82 @@ def process_llm_response(llm_response):
 
 def handler(event, context):
     """
-    Lambda handler for processing Dota 2 queries.
+    Process a user query using the game state and user information.
     
-    Args:
-        event (dict): The Lambda event containing the request data
-        context: The Lambda context
-        
-    Returns:
-        dict: The response containing the answer to the query
+    This function is the entry point for the Lambda.
     """
+    logger.info(f"Received event: {json.dumps(event)}")
+    
     try:
-        # Log the event for debugging
-        print(f"Received event: {json.dumps(event)[:500]}...")
+        # Extract authorization information
+        auth_header = event.get('headers', {}).get('Authorization')
+        auth_source = event.get('headers', {}).get('X-Auth-Source')
+        user_id = 'anonymous'
         
-        # Extract request data
-        body = json.loads(event.get('body', '{}')) if isinstance(event.get('body'), str) else event.get('body', {})
+        # Validate authentication if provided
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header[7:]  # Remove 'Bearer ' prefix
+            
+            # Determine auth source (Cognito or Google)
+            if auth_source == 'google':
+                # For Google tokens, we trust the authorizer has validated it
+                # and just extract the user ID from the requestContext
+                user_id = event.get('requestContext', {}).get('authorizer', {}).get('principalId', 'google-user')
+                logger.info(f"Using Google-authenticated user: {user_id}")
+            else:
+                # For Cognito tokens, we trust the authorizer has validated it
+                # and just extract the user ID from the requestContext
+                user_id = event.get('requestContext', {}).get('authorizer', {}).get('principalId', 'cognito-user')
+                logger.info(f"Using Cognito-authenticated user: {user_id}")
+        else:
+            logger.warning("No valid authorization header found")
         
-        # Extract query, game state, and user info
-        query = body.get('query', '')
+        # Parse the request body
+        body = json.loads(event.get('body', '{}'))
+        query = body.get('query')
         game_state = body.get('game_state', {})
         user_info = body.get('user_info', {})
         
-        # Log the extracted data
-        print(f"Extracted query: {query}")
-        print(f"Game state keys: {list(game_state.keys())}")
-        print(f"User info: {user_info}")
-        
         if not query:
-            return format_response({
-                "error": "No query provided",
-                "status": "error"
-            })
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Query is required'})
+            }
         
-        # Process the query with the game state
-        result = process_query(query, game_state, user_info)
+        # Get API credentials from Secrets Manager
+        try:
+            secret_name = os.environ.get('SECRET_NAME', 'LLMCredentials')
+            secret_response = secrets_manager.get_secret_value(SecretId=secret_name)
+            secret = json.loads(secret_response['SecretString'])
+            api_key = secret.get('OPENAI_API_KEY')
+            
+            if not api_key:
+                raise ValueError("API key not found in secret")
+        except Exception as e:
+            logger.error(f"Error retrieving API key: {str(e)}")
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'error': 'Failed to retrieve API credentials'})
+            }
+        
+        # Process the query using an LLM
+        completion = get_llm_response(query, game_state, user_info, api_key)
         
         # Return the result
-        return format_response(result)
-        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json'
+            },
+            'body': json.dumps({
+                'answer': completion,
+                'user_id': user_id,
+                'timestamp': context.get_remaining_time_in_millis()
+            })
+        }
     except Exception as e:
-        print(f"Error processing request: {str(e)}")
-        print(traceback.format_exc())
-        return format_response({
-            "error": str(e),
-            "status": "error"
-        })
-
-def format_response(body):
-    """Format the response for API Gateway."""
-    return {
-        "statusCode": 200,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization",
-            "Access-Control-Allow-Methods": "OPTIONS,POST,GET"
-        },
-        "body": json.dumps(body)
-    } 
+        logger.error(f"Error processing request: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': f'Internal server error: {str(e)}'})
+        } 

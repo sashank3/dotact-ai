@@ -3,25 +3,37 @@
  * 1. Cognito tokens from our user pool
  * 2. Google OAuth tokens for users who authenticated with Google
  */
+// Only import what we need rather than entire clients/libraries
 const { CognitoIdentityProviderClient, GetUserCommand } = require('@aws-sdk/client-cognito-identity-provider');
-const { verify } = require('jsonwebtoken');
-const https = require('https');
+const { decode, verify } = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
 
-// Initialize Cognito client
-const cognitoClient = new CognitoIdentityProviderClient();
+// Initialize clients only when needed (lazy loading)
+let cognitoClient;
+function getCognitoClient() {
+  if (!cognitoClient) {
+    cognitoClient = new CognitoIdentityProviderClient();
+  }
+  return cognitoClient;
+}
 
-// Google OAuth2 configuration
-const googleJwksClient = jwksClient({
-  jwksUri: 'https://www.googleapis.com/oauth2/v3/certs',
-  cache: true,
-  rateLimit: true,
-});
+// Google OAuth2 configuration - initialize only when needed
+let googleJwksClientInstance;
+function getGoogleJwksClient() {
+  if (!googleJwksClientInstance) {
+    googleJwksClientInstance = jwksClient({
+      jwksUri: 'https://www.googleapis.com/oauth2/v3/certs',
+      cache: true,
+      rateLimit: true,
+    });
+  }
+  return googleJwksClientInstance;
+}
 
 // Helper function to get a Google signing key
 const getGoogleSigningKey = (kid) => {
   return new Promise((resolve, reject) => {
-    googleJwksClient.getSigningKey(kid, (err, key) => {
+    getGoogleJwksClient().getSigningKey(kid, (err, key) => {
       if (err) {
         return reject(err);
       }
@@ -34,26 +46,23 @@ const getGoogleSigningKey = (kid) => {
 // Helper function to verify Google token
 const verifyGoogleToken = async (token) => {
   try {
-    // Decode the token without verification to get the header
-    const decoded = verify(token, '', { 
-      complete: true, 
-      algorithms: ['RS256'],
-      ignoreExpiration: false,
-      ignoreNotBefore: false
-    }, function(err, decoded) {});
+    // First, decode the token without verification to get the header with kid
+    const decoded = decode(token, { complete: true });
     
     if (!decoded || !decoded.header || !decoded.header.kid) {
       console.error('Invalid token format or missing kid');
       return null;
     }
     
+    console.log('Token header kid:', decoded.header.kid);
+    
     // Get the signing key for this specific token
     const signingKey = await getGoogleSigningKey(decoded.header.kid);
     
-    // Verify the token
+    // Verify the token with the proper key
     return verify(token, signingKey, { algorithms: ['RS256'] });
   } catch (error) {
-    console.error('Error verifying Google token:', error);
+    console.error('Error verifying Google token:', error.message);
     return null;
   }
 };
@@ -132,7 +141,7 @@ exports.handler = async (event) => {
       AccessToken: token
     });
     
-    const userData = await cognitoClient.send(getUserCommand);
+    const userData = await getCognitoClient().send(getUserCommand);
     
     if (!userData || !userData.Username) {
       console.error('Failed to get user data from Cognito token');

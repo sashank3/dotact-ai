@@ -15,16 +15,13 @@ import uvicorn
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # Import global configuration
-from src.global_config import GSI_CONFIG_PATH, GSI_CONFIG, GSI_HOST, GSI_PORT, STATE_FILE_PATH
+from src.global_config import GSI_CONFIG, GSI_HOST, GSI_PORT, STATE_FILE_PATH
 
 # Import state manager
 from src.gsi.state_manager import state_manager
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# Log the loaded configuration
-logger.info(f"Using GSI config path from global config: {GSI_CONFIG_PATH}")
 
 # Get the state file path from configuration
 STATE_FILE_PATH = GSI_CONFIG.get("state_file", "data/game_state.json")
@@ -106,7 +103,6 @@ def run_gsi_server(host=None, port=None):
     
     # Log the configuration
     logger.info(f"Starting GSI server on {host}:{port}")
-    logger.info(f"GSI config path: {GSI_CONFIG_PATH}")
     
     # Use uvicorn.Config and Server classes for thread-safe operation
     config = uvicorn.Config(
@@ -114,7 +110,8 @@ def run_gsi_server(host=None, port=None):
         host=host,
         port=port,
         reload=False,
-        log_level="info"
+        log_level="info",
+        access_log=False  # Disable access logs completely
     )
     server = uvicorn.Server(config)
     server.run()

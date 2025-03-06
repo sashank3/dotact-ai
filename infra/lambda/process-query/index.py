@@ -1,33 +1,31 @@
 import json
 import os
 import logging
-import boto3
-import requests
-import base64
-from botocore.exceptions import ClientError
 import traceback
 import datetime
 from typing import Dict, Any, Optional
 
-# Configure logging
+# Configure logging first - this is used throughout
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
-secrets_manager = boto3.client('secretsmanager')
-cognito = boto3.client('cognito-idp')
+# Initialize boto3 client only when needed
+def get_secrets_manager_client():
+    import boto3
+    return boto3.client('secretsmanager')
 
 def get_secret(secret_name):
     """Retrieve a secret from AWS Secrets Manager"""
-    client = boto3.client('secretsmanager')
     try:
+        client = get_secrets_manager_client()
         response = client.get_secret_value(SecretId=secret_name)
         if 'SecretString' in response:
             return json.loads(response['SecretString'])
         else:
+            import base64
             return json.loads(base64.b64decode(response['SecretBinary']))
-    except ClientError as e:
+    except Exception as e:
         logger.error(f"Error retrieving secret {secret_name}: {e}")
         raise e
 
@@ -246,7 +244,6 @@ def _process_ward_and_location_data(minimap_data):
         "Radiant Outpost Bot": (3392, -448),
         "Dire Outpost Top": (-3332, 35),
         "Dire Outpost Bot": (4068, -868),
-        "Roshan": (2900, 2600),
         "Top Lotus Pool": (-7682, 4419),
         "Bot Lotus Pool" : (8007, -4996),
         "Top Twin Gate": (-7488, 6912),
@@ -325,248 +322,48 @@ def build_prompt(user_query, game_state_text):
 
 def get_llm_response(query, game_state, user_info, api_key):
     """
-    Get a response from the LLM model using the OpenAI API.
+    Get a response from the LLM model using the Fireworks API.
     
     Args:
         query: The user's query text
         game_state: The current game state
         user_info: User information
-        api_key: The OpenAI API key
+        api_key: The Fireworks API key
         
     Returns:
         The LLM's response as a string
     """
     try:
-        # Extract relevant game state information
-        hero_name = game_state.get('hero', {}).get('name', 'Unknown')
-        game_time = game_state.get('map', {}).get('game_time', 0)
+        # Convert game state to readable text format
+        game_state_text, hero_name = convert_game_state_to_text(game_state)
         
-        # Format game time as MM:SS
-        minutes = int(game_time) // 60
-        seconds = int(game_time) % 60
-        formatted_time = f"{minutes}:{seconds:02d}"
+        # Build the prompt messages
+        messages = build_prompt(query, game_state_text)
         
-        # Create a prompt with context
-        prompt = f"""
-User: {user_info.get('name', 'Anonymous')}
-Query: {query}
-
-Game Context:
-- Hero: {hero_name}
-- Game Time: {formatted_time}
-- Items: {json.dumps(game_state.get('items', {}))}
-
-Please provide a helpful, accurate response to the query based on the game context.
-"""
-        
-        # Call OpenAI API
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            },
-            json={
-                "model": "gpt-4o",
-                "messages": [
-                    {"role": "system", "content": "You are a Dota 2 assistant that helps players with game-related questions."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 500
-            },
-            timeout=25  # Set timeout to prevent Lambda timeout
+        # Initialize the OpenAI client with Fireworks endpoint - only import OpenAI when needed
+        from openai import OpenAI
+        client = OpenAI(
+            base_url="https://api.fireworks.ai/inference/v1",
+            api_key=api_key,
+            timeout=30
         )
         
-        response.raise_for_status()
-        result = response.json()
+        # Call the LLM API
+        response = client.chat.completions.create(
+            model="accounts/fireworks/models/deepseek-r1",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=800,
+            timeout=30  # Set timeout to prevent Lambda timeout
+        )
         
         # Extract the completion text
-        completion = result['choices'][0]['message']['content']
+        completion = response.choices[0].message.content
         return completion
         
     except Exception as e:
         logger.error(f"Error calling LLM service: {str(e)}")
         return "I'm sorry, I encountered an error while processing your request. Please try again."
-
-def process_query(query, game_state, user_info):
-    """
-    Process a user query with the provided game state.
-    
-    Args:
-        query (str): The user's query
-        game_state (dict): The current game state
-        user_info (dict): Information about the user
-        
-    Returns:
-        dict: The processed result with the answer
-    """
-    try:
-        print(f"Processing query: {query}")
-        
-        # Check if game state is empty
-        if not game_state or not isinstance(game_state, dict):
-            print("Warning: Empty or invalid game state")
-            game_state = {}
-        
-        # Extract relevant information from game state
-        game_state_summary = extract_game_state_summary(game_state)
-        print(f"Extracted game state summary with keys: {list(game_state_summary.keys())}")
-        
-        # Get LLM API key from Secrets Manager
-        llm_api_key = get_api_key_from_secrets()
-        if not llm_api_key:
-            error_message = "Failed to retrieve LLM API key"
-            print(error_message)
-            return {
-                "error": error_message,
-                "status": "error"
-            }
-        
-        # Construct prompt for the LLM
-        prompt = construct_prompt(query, game_state_summary)
-        print(f"Constructed prompt of length: {len(prompt)}")
-        
-        # Call the LLM API
-        llm_response = get_llm_response(query, game_state, user_info, llm_api_key)
-        
-        # Check for errors in LLM response
-        if "error" in llm_response:
-            error_message = f"LLM API error: {llm_response['error']}"
-            print(error_message)
-            return {
-                "error": error_message,
-                "status": "error"
-            }
-        
-        # Process and format the LLM response
-        answer = process_llm_response(llm_response)
-        print(f"Processed LLM response of length: {len(answer)}")
-        
-        # Return the result
-        return {
-            "answer": answer,
-            "status": "success",
-            "game_state_summary": {
-                "hero": game_state_summary.get("hero", {}),
-                "map": game_state_summary.get("map", {}),
-                "allies": game_state_summary.get("allies", []),
-                "enemies": game_state_summary.get("enemies", [])
-            },
-            "timestamp": datetime.datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        error_message = f"Error processing query: {str(e)}"
-        print(error_message)
-        print(traceback.format_exc())
-        return {
-            "error": error_message,
-            "status": "error"
-        }
-
-def extract_game_state_summary(game_state):
-    """
-    Extract a summary of the game state for use in the LLM prompt.
-    
-    Args:
-        game_state (dict): The full game state
-        
-    Returns:
-        dict: A summary of the game state
-    """
-    summary = {}
-    
-    # Extract hero information
-    if "hero" in game_state:
-        hero_data = game_state.get("hero", {})
-        summary["hero"] = {
-            "name": hero_data.get("name", "Unknown").replace("npc_dota_hero_", ""),
-            "level": hero_data.get("level", 0),
-            "health": hero_data.get("health", 0),
-            "health_max": hero_data.get("health_max", 0),
-            "mana": hero_data.get("mana", 0),
-            "mana_max": hero_data.get("mana_max", 0)
-        }
-    
-    # Extract ally and enemy heroes (these are already processed by state_manager.py)
-    summary["allies"] = game_state.get("allies", [])
-    summary["enemies"] = game_state.get("enemies", [])
-    
-    # Extract map information
-    if "map" in game_state:
-        map_data = game_state.get("map", {})
-        summary["map"] = {
-            "game_time": map_data.get("game_time", 0),
-            "game_state": map_data.get("game_state", "Unknown"),
-            "match_id": map_data.get("matchid", "Unknown"),
-            "win_team": map_data.get("win_team", "Unknown"),
-            "radiant_score": map_data.get("radiant_score", 0),
-            "dire_score": map_data.get("dire_score", 0)
-        }
-    
-    # Extract items
-    if "items" in game_state:
-        items_data = game_state.get("items", {})
-        summary["items"] = []
-        
-        for slot, item in items_data.items():
-            if isinstance(item, dict) and "name" in item:
-                summary["items"].append({
-                    "name": item.get("name", "Unknown").replace("item_", ""),
-                    "purchaser": item.get("purchaser", None),
-                    "can_cast": item.get("can_cast", False),
-                    "cooldown": item.get("cooldown", 0),
-                    "charges": item.get("charges", 0)
-                })
-    
-    # Extract abilities
-    if "abilities" in game_state:
-        abilities_data = game_state.get("abilities", {})
-        summary["abilities"] = []
-        
-        for slot, ability in abilities_data.items():
-            if isinstance(ability, dict) and "name" in ability:
-                summary["abilities"].append({
-                    "name": ability.get("name", "Unknown").replace("ability_", ""),
-                    "level": ability.get("level", 0),
-                    "can_cast": ability.get("can_cast", False),
-                    "cooldown": ability.get("cooldown", 0),
-                    "ultimate": ability.get("ultimate", False)
-                })
-    
-    # Extract player information
-    if "player" in game_state:
-        player_data = game_state.get("player", {})
-        summary["player"] = {
-            "team": player_data.get("team_name", "Unknown"),
-            "gold": player_data.get("gold", 0),
-            "gold_reliable": player_data.get("gold_reliable", 0),
-            "gold_unreliable": player_data.get("gold_unreliable", 0),
-            "gpm": player_data.get("gpm", 0),
-            "xpm": player_data.get("xpm", 0)
-        }
-    
-    # Extract minimap information for ward locations
-    if "minimap" in game_state:
-        minimap_data = game_state.get("minimap", {})
-        wards = []
-        
-        for obj_key, obj_data in minimap_data.items():
-            if isinstance(obj_data, dict) and "image" in obj_data:
-                image_type = obj_data.get("image", "")
-                if "ward" in image_type:
-                    wards.append({
-                        "type": image_type,
-                        "position_x": obj_data.get("position_x", 0),
-                        "position_y": obj_data.get("position_y", 0),
-                        "team": "ally" if "ally" in image_type else "enemy"
-                    })
-        
-        if wards:
-            summary["wards"] = wards
-    
-    return summary
 
 def get_api_key_from_secrets():
     """
@@ -576,13 +373,11 @@ def get_api_key_from_secrets():
         str: The API key
     """
     try:
-        # Initialize Secrets Manager client
-        secrets_client = boto3.client('secretsmanager')
-        
         # Get the secret - use environment variable or default to 'LLMCredentials'
         secret_name = os.environ.get('SECRETS_NAME', 'LLMCredentials')
-        print(f"Looking for secret: {secret_name}")
+        logger.info(f"Looking for secret: {secret_name}")
         
+        secrets_client = get_secrets_manager_client()
         response = secrets_client.get_secret_value(
             SecretId=secret_name
         )
@@ -591,200 +386,20 @@ def get_api_key_from_secrets():
         if 'SecretString' in response:
             secret = json.loads(response['SecretString'])
             
-            # Try different possible key names
-            for key_name in ['NEBIUS_API_KEY', 'LLM_API_KEY', 'API_KEY', 'api_key', 'nebius_api_key']:
-                if key_name in secret:
-                    print(f"Found API key with name: {key_name}")
-                    return secret[key_name]
-            
-            # If we get here, we didn't find a recognized key
-            print("API key not found in expected format. Available keys:", list(secret.keys()))
-            
             # If there's only one key in the secret, use that
             if len(secret) == 1:
                 only_key = list(secret.values())[0]
-                print("Using the only available key in the secret")
+                logger.info("Using the only available key in the secret")
                 return only_key
-                
-            # As a fallback, try to use the first string value
-            for key, value in secret.items():
-                if isinstance(value, str) and value.startswith("ey"):  # JWT tokens often start with "ey"
-                    print(f"Using key that looks like a JWT token: {key}")
-                    return value
-        
-        print("API key not found in Secrets Manager")
-        
-        # Fallback to environment variable if available
-        env_api_key = os.environ.get('NEBIUS_API_KEY')
-        if env_api_key:
-            print("Using API key from environment variable")
-            return env_api_key
+            else:
+                logger.warning("API key not found in Secrets Manager")
             
         return None
         
     except Exception as e:
-        print(f"Error getting API key from Secrets Manager: {str(e)}")
-        print(traceback.format_exc())
-        
-        # Fallback to environment variable if available
-        env_api_key = os.environ.get('NEBIUS_API_KEY')
-        if env_api_key:
-            print("Using API key from environment variable after Secrets Manager error")
-            return env_api_key
-            
+        logger.error(f"Error getting API key from Secrets Manager: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
-
-def construct_prompt(query, game_state_summary):
-    """
-    Construct a prompt for the LLM based on the query and game state.
-    
-    Args:
-        query (str): The user's query
-        game_state_summary (dict): Summary of the game state
-        
-    Returns:
-        str: The constructed prompt
-    """
-    # Format the game state summary as a string
-    game_state_text = format_game_state_for_prompt(game_state_summary)
-    
-    # Construct the prompt
-    prompt = f"""
-As Keenmind, a Dota 2 assistant, please help with the following query based on the current game state:
-
-CURRENT GAME STATE:
-{game_state_text}
-
-USER QUERY:
-{query}
-
-Please provide a helpful, accurate, and concise response focused specifically on answering the query based on the game state information provided.
-"""
-    
-    return prompt
-
-def format_game_state_for_prompt(game_state_summary):
-    """
-    Format the game state summary in a more readable way for the prompt.
-    
-    Args:
-        game_state_summary (dict): The game state summary
-        
-    Returns:
-        str: Formatted game state text
-    """
-    sections = []
-    
-    # Add map information
-    if "map" in game_state_summary:
-        map_data = game_state_summary["map"]
-        game_time_minutes = int(map_data.get("game_time", 0)) // 60
-        game_time_seconds = int(map_data.get("game_time", 0)) % 60
-        
-        map_section = f"GAME INFO:\n"
-        map_section += f"- Game Time: {game_time_minutes}:{game_time_seconds:02d}\n"
-        map_section += f"- Game State: {map_data.get('game_state', 'Unknown')}\n"
-        map_section += f"- Match ID: {map_data.get('match_id', 'Unknown')}\n"
-        
-        if map_data.get('win_team') != "Unknown":
-            map_section += f"- Winning Team: {map_data.get('win_team')}\n"
-            
-        sections.append(map_section)
-    
-    # Add hero information
-    if "hero" in game_state_summary:
-        hero_data = game_state_summary["hero"]
-        hero_name = hero_data.get("name", "Unknown").replace("_", " ").title()
-        
-        hero_section = f"PLAYER HERO - {hero_name}:\n"
-        hero_section += f"- Level: {hero_data.get('level', 0)}\n"
-        hero_section += f"- Health: {hero_data.get('health', 0)}/{hero_data.get('health_max', 0)}\n"
-        hero_section += f"- Mana: {hero_data.get('mana', 0)}/{hero_data.get('mana_max', 0)}\n"
-        
-        sections.append(hero_section)
-    
-    # Add abilities
-    if "abilities" in game_state_summary and game_state_summary["abilities"]:
-        abilities = game_state_summary["abilities"]
-        
-        abilities_section = "ABILITIES:\n"
-        for ability in abilities:
-            ability_name = ability.get("name", "Unknown").replace("_", " ").title()
-            ability_level = ability.get("level", 0)
-            cooldown = ability.get("cooldown", 0)
-            
-            status = "Ready" if ability.get("can_cast", False) else f"Cooldown: {cooldown}s"
-            abilities_section += f"- {ability_name} (Level {ability_level}): {status}\n"
-            
-        sections.append(abilities_section)
-    
-    # Add items
-    if "items" in game_state_summary and game_state_summary["items"]:
-        items = game_state_summary["items"]
-        
-        items_section = "ITEMS:\n"
-        for item in items:
-            item_name = item.get("name", "Unknown").replace("_", " ").title()
-            charges = item.get("charges", 0)
-            cooldown = item.get("cooldown", 0)
-            
-            item_info = f"- {item_name}"
-            if charges > 0:
-                item_info += f" ({charges} charges)"
-            if cooldown > 0:
-                item_info += f" (Cooldown: {cooldown}s)"
-                
-            items_section += f"{item_info}\n"
-            
-        sections.append(items_section)
-    
-    # Add ally and enemy heroes
-    allies = game_state_summary.get("allies", [])
-    enemies = game_state_summary.get("enemies", [])
-    
-    if allies:
-        allies_formatted = [name.replace("_", " ").title() for name in allies]
-        sections.append(f"ALLY HEROES: {', '.join(allies_formatted)}")
-    
-    if enemies:
-        enemies_formatted = [name.replace("_", " ").title() for name in enemies]
-        sections.append(f"ENEMY HEROES: {', '.join(enemies_formatted)}")
-    
-    # Combine all sections
-    return "\n\n".join(sections)
-
-def process_llm_response(llm_response):
-    """
-    Process and format the LLM response.
-    
-    Args:
-        llm_response (dict): The raw LLM response
-        
-    Returns:
-        str: The processed answer
-    """
-    try:
-        # Check for errors
-        if "error" in llm_response:
-            return f"Error from LLM: {llm_response['error']}"
-        
-        # Extract the answer from the response (DeepSeek R1 format)
-        if "choices" in llm_response and len(llm_response["choices"]) > 0:
-            message = llm_response["choices"][0].get("message", {})
-            content = message.get("content", "")
-            
-            # Log token usage if available
-            if "usage" in llm_response:
-                usage = llm_response["usage"]
-                print(f"Token usage - Prompt: {usage.get('prompt_tokens', 0)}, Completion: {usage.get('completion_tokens', 0)}, Total: {usage.get('total_tokens', 0)}")
-            
-            return content
-        
-        return "No response from LLM"
-        
-    except Exception as e:
-        print(f"Error processing LLM response: {str(e)}")
-        return f"Error processing LLM response: {str(e)}"
 
 def handler(event, context):
     """
@@ -802,19 +417,9 @@ def handler(event, context):
         
         # Validate authentication if provided
         if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header[7:]  # Remove 'Bearer ' prefix
-            
-            # Determine auth source (Cognito or Google)
-            if auth_source == 'google':
-                # For Google tokens, we trust the authorizer has validated it
-                # and just extract the user ID from the requestContext
-                user_id = event.get('requestContext', {}).get('authorizer', {}).get('principalId', 'google-user')
-                logger.info(f"Using Google-authenticated user: {user_id}")
-            else:
-                # For Cognito tokens, we trust the authorizer has validated it
-                # and just extract the user ID from the requestContext
-                user_id = event.get('requestContext', {}).get('authorizer', {}).get('principalId', 'cognito-user')
-                logger.info(f"Using Cognito-authenticated user: {user_id}")
+            # Extract user ID from authorization context
+            user_id = event.get('requestContext', {}).get('authorizer', {}).get('principalId', 'authenticated-user')
+            logger.info(f"Using authenticated user: {user_id}")
         else:
             logger.warning("No valid authorization header found")
         
@@ -831,22 +436,15 @@ def handler(event, context):
             }
         
         # Get API credentials from Secrets Manager
-        try:
-            secret_name = os.environ.get('SECRET_NAME', 'LLMCredentials')
-            secret_response = secrets_manager.get_secret_value(SecretId=secret_name)
-            secret = json.loads(secret_response['SecretString'])
-            api_key = secret.get('OPENAI_API_KEY')
-            
-            if not api_key:
-                raise ValueError("API key not found in secret")
-        except Exception as e:
-            logger.error(f"Error retrieving API key: {str(e)}")
+        api_key = get_api_key_from_secrets()
+        
+        if not api_key:
             return {
                 'statusCode': 500,
                 'body': json.dumps({'error': 'Failed to retrieve API credentials'})
             }
         
-        # Process the query using an LLM
+        # Process the query using Nebius LLM
         completion = get_llm_response(query, game_state, user_info, api_key)
         
         # Return the result
@@ -858,12 +456,13 @@ def handler(event, context):
             'body': json.dumps({
                 'answer': completion,
                 'user_id': user_id,
-                'timestamp': context.get_remaining_time_in_millis()
+                'timestamp': datetime.datetime.now().isoformat()
             })
         }
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
+        logger.error(traceback.format_exc())
         return {
             'statusCode': 500,
             'body': json.dumps({'error': f'Internal server error: {str(e)}'})
-        } 
+        }

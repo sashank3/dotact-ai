@@ -1,12 +1,10 @@
-server:
-  host: "127.0.0.1"
-  port: 8002
-  log_interval: 60
-
 auth:
-  token: "my_super_secret_token_123!"
-
+  token: my_super_secret_token_123!
 dota2:
-  gsi_config_path: "C:/Program Files (x86)/Steam/steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration/gamestate_integration_custom.cfg"
-
-state_file: "data/game_state.json"
+  first_install: false
+  gsi_config_path: C:/Program Files (x86)/Steam/steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration/gamestate_integration_custom.cfg
+server:
+  host: 127.0.0.1
+  log_interval: 120
+  port: 8002
+state_file: data/game_state.json

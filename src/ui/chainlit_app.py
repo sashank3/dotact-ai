@@ -7,6 +7,7 @@ import base64
 from itsdangerous import URLSafeSerializer, BadSignature, SignatureExpired
 import time
 import json
+import re
 
 # Ensure Python can find your "src" folder
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -317,22 +318,39 @@ async def on_message(message: cl.Message):
             answer = response.get("answer", "Sorry, I couldn't find an answer to your query.")
             logging.info(f"Received answer: {answer[:50]}...")
             
-            # Send the response
-            await cl.Message(content=answer).send()
+            # Extract content between <think> and </think> tags
+            thinking_pattern = r'<think>(.*?)</think>'
+            thinking_matches = re.findall(thinking_pattern, answer, re.DOTALL)
             
-            # Save chat history if we have a user ID
-            if user_info and user_info.get("id"):
-                save_chat_history(
-                    user_id=user_info.get("id"),
-                    query=message.content,
-                    response=answer,
-                    metadata={
-                        "game_state_summary": response.get("game_state_summary", {}),
-                        "timestamp": response.get("timestamp")
-                    }
-                )
-            else:
-                logging.warning("No user ID available for saving chat history")
+            # Join all thinking content if multiple matches
+            thinking_content = "\n".join(thinking_matches) if thinking_matches else ""
+            
+            # Remove all <think>...</think> blocks from the answer
+            clean_answer = re.sub(thinking_pattern, '', answer, flags=re.DOTALL)
+            
+            # If we have thinking content, display it in a Step
+            if thinking_content:
+                async with cl.Step(name="Thinking") as thinking_step:
+                    await thinking_step.stream_token(thinking_content)
+                    thinking_step.name = "Keenmind's Reasoning"
+                    await thinking_step.update()
+            
+            # Send the clean response
+            await cl.Message(content=clean_answer).send()
+            
+            # # Save chat history if we have a user ID
+            # if user_info and user_info.get("id"):
+            #     save_chat_history(
+            #         user_id=user_info.get("id"),
+            #         query=message.content,
+            #         response=answer,
+            #         metadata={
+            #             "game_state_summary": response.get("game_state_summary", {}),
+            #             "timestamp": response.get("timestamp")
+            #         }
+            #     )
+            # else:
+            #     logging.warning("No user ID available for saving chat history")
             
         except Exception as e:
             logging.error(f"Error processing query: {str(e)}")
@@ -350,21 +368,21 @@ async def on_message(message: cl.Message):
             author="System"
         ).send()
 
-@cl.action_callback("clear_history")
-async def clear_history_action(action):
-    """Clear chat history for the current user."""
-    try:
-        user_id = cl.user_session.get("user_id")
-        if not user_id:
-            await cl.Message(content="No user ID found. Cannot clear history.").send()
-            return
+# @cl.action_callback("clear_history")
+# async def clear_history_action(action):
+#     """Clear chat history for the current user."""
+#     try:
+#         user_id = cl.user_session.get("user_id")
+#         if not user_id:
+#             await cl.Message(content="No user ID found. Cannot clear history.").send()
+#             return
             
-        clear_chat_history(user_id)
-        await cl.Message(content="Chat history cleared successfully!").send()
+#         clear_chat_history(user_id)
+#         await cl.Message(content="Chat history cleared successfully!").send()
         
-    except Exception as e:
-        logger.error(f"Error clearing history: {str(e)}")
-        await cl.Message(content=f"Error clearing history: {str(e)}").send()
+#     except Exception as e:
+#         logger.error(f"Error clearing history: {str(e)}")
+#         await cl.Message(content=f"Error clearing history: {str(e)}").send()
 
 # Note: This module doesn't need a run_chainlit() function because:
 # 1. It's loaded directly by the Chainlit CLI when started by auth.py

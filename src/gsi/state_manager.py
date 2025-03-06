@@ -16,18 +16,25 @@ class HeroExtractor:
     
     def __init__(self):
         """Initialize the hero extractor."""
-        self.previous_enemy_heroes = set()
     
     def extract_hero_lists(self, game_state: dict, state_manager_instance) -> None:
         """
         Extracts ally and enemy hero lists from the game state.
-        Updates the ally_heroes and enemy_heroes sets in the provided StateManager instance.
+        Updates the ally_heroes and enemy_heroes in the state object.
         
         Args:
             game_state (dict): The current game state
             state_manager_instance: The StateManager instance to update
         """
-        current_enemy_heroes_before_update = set(state_manager_instance.enemy_heroes)
+        state = state_manager_instance.state
+        
+        # Initialize hero lists if they don't exist
+        if "allies" not in state:
+            state["allies"] = []
+        if "enemies" not in state:
+            state["enemies"] = []
+            
+        current_enemy_heroes_before_update = set(state["enemies"])
         
         minimap_data = game_state.get("minimap", {})
         if minimap_data:
@@ -38,38 +45,48 @@ class HeroExtractor:
                     image_type = obj_data.get("image", "")
                     
                     if "herocircle_self" in image_type or "herocircle" in image_type:  # Ally heroes
-                        state_manager_instance.ally_heroes.add(hero_name_cleaned)
+                        if hero_name_cleaned not in state["allies"]:
+                            state["allies"].append(hero_name_cleaned)
                     elif image_type == "minimap_enemyicon":  # Enemy heroes
-                        state_manager_instance.enemy_heroes.add(hero_name_cleaned)
+                        if hero_name_cleaned not in state["enemies"]:
+                            state["enemies"].append(hero_name_cleaned)
         
-        if len(state_manager_instance.ally_heroes) + len(state_manager_instance.enemy_heroes) == 10:
+        if len(state["allies"]) + len(state["enemies"]) == 10:
             state_manager_instance.heroes_tracked = True
             logger.info(
                 f"All 10 heroes found for match {state_manager_instance.current_match_id}. "
-                f"Tracking stopped. Allies: {state_manager_instance.ally_heroes}, "
-                f"Enemies: {state_manager_instance.enemy_heroes}"
+                f"Tracking stopped. Allies: {state['allies']}, "
+                f"Enemies: {state['enemies']}"
             )
         else:
-            current_enemy_heroes_after_update = set(state_manager_instance.enemy_heroes)
+            current_enemy_heroes_after_update = set(state["enemies"])
             if len(current_enemy_heroes_after_update) > len(current_enemy_heroes_before_update):  # New enemy hero detected
-                logger.debug(
+                logger.info(
                     f"New enemy hero detected for match {state_manager_instance.current_match_id}. "
-                    f"Allies: {state_manager_instance.ally_heroes}, "
-                    f"Enemies: {state_manager_instance.enemy_heroes}"
+                    f"Allies: {state['allies']}, "
+                    f"Enemies: {state['enemies']}"
                 )
-        
-        self.previous_enemy_heroes = set(state_manager_instance.enemy_heroes)  # Update for next iteration
 
 class StateLogger:
-    """Logs game state at regular intervals to avoid excessive logging."""
+    """Logs game state at regular intervals by saving complete state snapshots."""
     
     def __init__(self):
         """Initialize the state logger."""
         self.last_log_time = 0
         self.log_interval = GSI_LOG_INTERVAL  # Seconds between logs
+        
+        # Get session directory from environment
+        self.session_dir = os.environ.get("SESSION_DIR")
+        self.logging_enabled = self.session_dir is not None
+        
+        if not self.logging_enabled:
+            logger.warning("SESSION_DIR not found in environment, state logging is disabled")
     
     def should_log(self):
         """Check if enough time has passed to log again."""
+        if not self.logging_enabled:
+            return False
+            
         current_time = time.time()
         if current_time - self.last_log_time >= self.log_interval:
             self.last_log_time = current_time
@@ -77,12 +94,23 @@ class StateLogger:
         return False
     
     def log_state(self, state):
-        """Log the current state if the interval has passed."""
-        if self.should_log():
-            # Log a summary of the state
-            hero_name = state.get("hero", {}).get("name", "Unknown")
-            game_time = state.get("map", {}).get("game_time", 0)
-            logger.info(f"Game state updated: Hero={hero_name}, Game time={game_time}")
+        """
+        Save a complete snapshot of the current state to a timestamped file
+        in the session directory when the log interval has passed.
+        """
+        if not self.should_log() or not state:
+            return
+            
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = os.path.join(self.session_dir, f"gsi_state_{timestamp}.json")
+            
+            with open(log_file, 'w') as f:
+                json.dump(state, f, indent=2)
+                
+            logger.info(f"[STATE LOGGER] Saved state snapshot to {log_file}")
+        except Exception as e:
+            logger.error(f"[STATE LOGGER] Error saving state snapshot: {e}")
 
 class StateManager:
     """Manages the game state, including loading, saving, and updating."""
@@ -95,9 +123,7 @@ class StateManager:
         self.hero_extractor = HeroExtractor()
         self._lock = Lock()
         
-        # Hero tracking
-        self.ally_heroes: Set[str] = set()
-        self.enemy_heroes: Set[str] = set()
+        # Track match and hero detection status, but not the heroes themselves
         self.current_match_id = None
         self.heroes_tracked = False
         
@@ -122,8 +148,9 @@ class StateManager:
                 
                 # Reset hero tracking if match ID changes
                 if match_id != self.current_match_id:
-                    self.ally_heroes = set()
-                    self.enemy_heroes = set()
+                    # Reset heroes directly in state
+                    self.state["allies"] = []
+                    self.state["enemies"] = []
                     self.current_match_id = match_id
                     self.heroes_tracked = False
                     logger.info(f"Match ID changed, resetting hero lists. New Match ID: {match_id}")
@@ -139,17 +166,6 @@ class StateManager:
                     
                     # Update the category with new data
                     self.state[category].update(data)
-                
-                # Add hero lists to the state
-                self.state["allies"] = list(self.ally_heroes)
-                self.state["enemies"] = list(self.enemy_heroes)
-                
-                # Add timestamp
-                self.state["_meta"] = {
-                    "last_updated": datetime.now().isoformat(),
-                    "match_id": self.current_match_id,
-                    "heroes_tracked": self.heroes_tracked
-                }
                 
                 # Save the updated state
                 self.save_state()
@@ -185,16 +201,21 @@ class StateManager:
                 with open(self.state_file, 'r') as f:
                     self.state = json.load(f)
                 
-                # Restore hero tracking state
-                self.ally_heroes = set(self.state.get("allies", []))
-                self.enemy_heroes = set(self.state.get("enemies", []))
-                meta = self.state.get("_meta", {})
-                self.current_match_id = meta.get("match_id")
-                self.heroes_tracked = meta.get("heroes_tracked", False)
+                # Check if we have pre-existing match data
+                if "allies" in self.state and "enemies" in self.state:
+                    # Set match ID from map data if available
+                    if "map" in self.state and "matchid" in self.state["map"]:
+                        self.current_match_id = self.state["map"]["matchid"]
+                    
+                    # Check if heroes are fully tracked
+                    self.heroes_tracked = (
+                        len(self.state.get("allies", [])) + 
+                        len(self.state.get("enemies", [])) == 10
+                    )
                 
                 logger.info(f"Loaded game state from {self.state_file}")
                 if self.heroes_tracked:
-                    logger.info(f"Restored hero tracking: Allies={self.ally_heroes}, Enemies={self.enemy_heroes}")
+                    logger.info(f"Restored hero tracking: Allies={self.state.get('allies', [])}, Enemies={self.state.get('enemies', [])}")
             else:
                 logger.info(f"No state file found at {self.state_file}, starting with empty state")
                 self.state = {}

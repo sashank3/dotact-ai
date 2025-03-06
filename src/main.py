@@ -34,6 +34,20 @@ def setup_api_configuration():
     api_url = configure_process_query_api()
     return api_url
 
+def setup_gsi_files():
+    """Set up GSI configuration files if this is the first install."""
+    from src.gsi.gsi_file_setup import gsi_file_setup
+    from src.global_config import GLOBAL_CONFIG
+    
+    # Check if this is the first install
+    first_install = GLOBAL_CONFIG.get("data", {}).get("gsi", {}).get("dota2", {}).get("first_install", False)
+    
+    if first_install:
+        logging.info("[MAIN] First installation detected. Setting up GSI files...")
+        gsi_file_setup()
+    else:
+        logging.info("[MAIN] Not first install, skipping GSI file setup")
+
 def start_gsi_server():
     """Start the GSI server in a separate thread."""
     from src.gsi.server import run_gsi_server
@@ -78,6 +92,9 @@ def start_services():
     2. Auth Server - Handles user authentication
        (The Auth Server will start Chainlit when a user authenticates)
     """
+    # Setup GSI files if needed before starting the GSI server
+    setup_gsi_files()
+    
     # Start GSI server
     gsi_thread = start_gsi_server()
     

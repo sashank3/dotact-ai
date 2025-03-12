@@ -2,11 +2,12 @@
 import logging
 import json
 import os
-from typing import Optional, Dict, Set
+import asyncio
+import aiofiles
+from typing import Optional, Dict
 from threading import Lock
-from src.global_config import STATE_FILE_PATH, GSI_LOG_INTERVAL
-import time
-import datetime
+from src.global_config import STATE_FILE_PATH
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -67,51 +68,6 @@ class HeroExtractor:
                     f"Enemies: {state['enemies']}"
                 )
 
-class StateLogger:
-    """Logs game state at regular intervals by saving complete state snapshots."""
-    
-    def __init__(self):
-        """Initialize the state logger."""
-        self.last_log_time = 0
-        self.log_interval = GSI_LOG_INTERVAL  # Seconds between logs
-        
-        # Get session directory from environment
-        self.session_dir = os.environ.get("SESSION_DIR")
-        self.logging_enabled = self.session_dir is not None
-        
-        if not self.logging_enabled:
-            logger.warning("SESSION_DIR not found in environment, state logging is disabled")
-    
-    def should_log(self):
-        """Check if enough time has passed to log again."""
-        if not self.logging_enabled:
-            return False
-            
-        current_time = time.time()
-        if current_time - self.last_log_time >= self.log_interval:
-            self.last_log_time = current_time
-            return True
-        return False
-    
-    def log_state(self, state):
-        """
-        Save a complete snapshot of the current state to a timestamped file
-        in the session directory when the log interval has passed.
-        """
-        if not self.should_log() or not state:
-            return
-            
-        try:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = os.path.join(self.session_dir, f"gsi_state_{timestamp}.json")
-            
-            with open(log_file, 'w') as f:
-                json.dump(state, f, indent=2)
-                
-            logger.info(f"[STATE LOGGER] Saved state snapshot to {log_file}")
-        except Exception as e:
-            logger.error(f"[STATE LOGGER] Error saving state snapshot: {e}")
-
 class StateManager:
     """Manages the game state, including loading, saving, and updating."""
     
@@ -119,7 +75,6 @@ class StateManager:
         """Initialize the state manager."""
         self.state = {}
         self.state_file = STATE_FILE_PATH
-        self.logger = StateLogger()
         self.hero_extractor = HeroExtractor()
         self._lock = Lock()
         
@@ -131,7 +86,7 @@ class StateManager:
         os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
         
         # Load initial state if available
-        self.load_state()
+        asyncio.run(self.load_state())
     
     def update_state(self, new_state: Dict) -> None:
         """
@@ -168,10 +123,7 @@ class StateManager:
                     self.state[category].update(data)
                 
                 # Save the updated state
-                self.save_state()
-                
-                # Log the state update
-                self.logger.log_state(self.state)
+                asyncio.create_task(self.save_state())
                 
             except Exception as e:
                 logger.error(f"Error updating state: {str(e)}")
@@ -186,21 +138,28 @@ class StateManager:
         with self._lock:
             return self.state if self.state else None
     
-    def save_state(self) -> None:
-        """Save the current state to the state file."""
+    async def save_state(self) -> None:
+        """Save the current state to the state file asynchronously."""
         try:
-            with open(self.state_file, 'w') as f:
-                json.dump(self.state, f, indent=2)
+            # Use aiofiles for async file writing
+            async with aiofiles.open(self.state_file, mode='w') as f:
+                state_json = json.dumps(self.state, indent=2)
+                await f.write(state_json)
         except Exception as e:
             logger.error(f"Error saving state: {str(e)}")
     
-    def load_state(self) -> None:
-        """Load the state from the state file if it exists."""
+    async def load_state(self) -> None:
+        """Load the state from the state file if it exists asynchronously."""
         try:
             if os.path.exists(self.state_file):
-                with open(self.state_file, 'r') as f:
-                    self.state = json.load(f)
-                
+                # Use aiofiles for async file reading
+                async with aiofiles.open(self.state_file, mode='r') as f:
+                    contents = await f.read()
+                    if contents:  # Check if file is not empty
+                        self.state = json.loads(contents)
+                    else:
+                        self.state = {}  # Handle empty file case
+
                 # Check if we have pre-existing match data
                 if "allies" in self.state and "enemies" in self.state:
                     # Set match ID from map data if available

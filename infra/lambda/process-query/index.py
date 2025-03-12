@@ -3,7 +3,6 @@ import os
 import logging
 import traceback
 import datetime
-from typing import Dict, Any, Optional
 
 # Configure logging first - this is used throughout
 logging.basicConfig(level=logging.INFO)
@@ -296,20 +295,48 @@ def _process_ward_and_location_data(minimap_data):
 def build_prompt(user_query, game_state_text):
     """
     Construct a structured list of messages for the Nebius chat endpoint.
+    Based on whether game state data is valid or not, use different prompts.
     """
+    # Check if game state has valid data
+    has_valid_game_state = not game_state_text.startswith("=== DOTA 2 GAME STATE ===\nNo valid game state data available.")
+    
+    if has_valid_game_state:
+        system_content = (
+            "You are an expert Dota 2 assistant that provides highly relevant in-game advice. "
+            "Format your response with two main sections:\n\n"
+            "RECOMMENDED ITEMS\n"
+            "• List 2-5 recommended items in order of priority (highest priority first)\n"
+            "• Include a priority rating for each item (Critical, High, Medium, or Low)\n\n"
+            "GAME STRATEGIES\n"
+            "• List 2-5 strategies based on the current game state in order of priority\n"
+            "• Include a priority rating for each strategy (Critical, High, Medium, or Low)\n\n"
+            "Keep explanations clear and concise, prioritize high-impact recommendations, "
+            "and ensure advice is immediately actionable based on the current game state.\n\n"
+            "If the query is NOT related to Dota 2, respond only with: \"I'm a Dota 2 assistant and can only "
+            "provide information related to Dota 2. Please ask me about heroes, items, strategies, or other "
+            "game-related topics.\""
+        )
+    else:
+        system_content = (
+            "You are an expert Dota 2 assistant providing general game advice. "
+            "Since no specific game data is available, offer generic Dota 2 guidance.\n\n"
+            "Format your response with two main sections:\n\n"
+            "RECOMMENDED ITEMS\n"
+            "• List 2-5 generally useful items in order of priority (highest priority first)\n"
+            "• Include a priority rating for each item (Critical, High, Medium, or Low)\n\n"
+            "GAME STRATEGIES\n"
+            "• List 2-5 general Dota 2 strategies in order of priority\n"
+            "• Include a priority rating for each strategy (Critical, High, Medium, or Low)\n\n"
+            "Keep explanations clear and concise. Do not use explicit markdown formatting.\n\n"
+            "If the query is NOT related to Dota 2, respond only with: \"I'm a Dota 2 assistant and can only "
+            "provide information related to Dota 2. Please ask me about heroes, items, strategies, or other "
+            "game-related topics.\""
+        )
+    
     return [
         {
             "role": "system",
-            "content": (
-                "You are an expert Dota 2 assistant that provides highly relevant in-game advice. "
-                "Format your response in markdown with two main sections:\n\n"
-                "## Recommended Items\n"
-                "• List 2-5 recommended items with explanations\n\n"
-                "## Game Strategies\n"
-                "• List 2-5 strategies based on the current game state\n\n"
-                "Keep explanations clear and concise, prioritize high-impact recommendations, "
-                "and ensure advice is immediately actionable based on the current game state."
-            )
+            "content": system_content
         },
         {
             "role": "user",
@@ -320,7 +347,7 @@ def build_prompt(user_query, game_state_text):
         }
     ]
 
-def get_llm_response(query, game_state, user_info, api_key):
+def get_llm_response(query, game_state, user_info, api_key, chat_context=None):
     """
     Get a response from the LLM model using the Fireworks API.
     
@@ -329,6 +356,7 @@ def get_llm_response(query, game_state, user_info, api_key):
         game_state: The current game state
         user_info: User information
         api_key: The Fireworks API key
+        chat_context: Previous conversation history in OpenAI format (optional)
         
     Returns:
         The LLM's response as a string
@@ -337,8 +365,39 @@ def get_llm_response(query, game_state, user_info, api_key):
         # Convert game state to readable text format
         game_state_text, hero_name = convert_game_state_to_text(game_state)
         
-        # Build the prompt messages
-        messages = build_prompt(query, game_state_text)
+        # If we have chat context, use it to maintain conversation history
+        if chat_context and isinstance(chat_context, list) and len(chat_context) > 0:
+            logger.info(f"Using provided chat context with {len(chat_context)} messages")
+            
+            # Find system message if it exists
+            has_system_message = any(msg.get('role') == 'system' for msg in chat_context)
+            
+            if not has_system_message:
+                # No system message found, use build_prompt to get the proper system message
+                # and then combine with existing chat context
+                prompt_messages = build_prompt(query, game_state_text)
+                system_message = next((msg for msg in prompt_messages if msg.get('role') == 'system'), None)
+                
+                if system_message:
+                    # Add system message at the beginning
+                    chat_context = [system_message] + [
+                        msg for msg in chat_context if msg.get('role') != 'system'
+                    ]
+            
+            # Create a new user message with the current query and game state
+            # This ensures every interaction has the latest game state
+            new_user_message = {
+                "role": "user", 
+                "content": f"Game Context:\n{game_state_text}\n\nPlayer Query: {query}"
+            }
+            
+            # Add the new user message to the chat context
+            messages = chat_context + [new_user_message]
+            
+        else:
+            # No chat context provided, use the default prompt
+            logger.info("No chat context provided, using default prompt")
+            messages = build_prompt(query, game_state_text)
         
         # Initialize the OpenAI client with Fireworks endpoint - only import OpenAI when needed
         from openai import OpenAI
@@ -353,7 +412,7 @@ def get_llm_response(query, game_state, user_info, api_key):
             model="accounts/fireworks/models/deepseek-r1",
             messages=messages,
             temperature=0.7,
-            max_tokens=800,
+            max_tokens=1500,
             timeout=30  # Set timeout to prevent Lambda timeout
         )
         
@@ -428,6 +487,7 @@ def handler(event, context):
         query = body.get('query')
         game_state = body.get('game_state', {})
         user_info = body.get('user_info', {})
+        chat_context = body.get('chat_context', [])  # Get chat context from request
         
         if not query:
             return {
@@ -445,7 +505,7 @@ def handler(event, context):
             }
         
         # Process the query using Nebius LLM
-        completion = get_llm_response(query, game_state, user_info, api_key)
+        completion = get_llm_response(query, game_state, user_info, api_key, chat_context)
         
         # Return the result
         return {

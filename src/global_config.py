@@ -83,7 +83,6 @@ try:
     GSI_SERVER_CONFIG = GSI_CONFIG.get("server", {})
     GSI_HOST = GSI_SERVER_CONFIG.get("host", "127.0.0.1")
     GSI_PORT = GSI_SERVER_CONFIG.get("port", 8002)
-    GSI_LOG_INTERVAL = GSI_SERVER_CONFIG.get("log_interval", 60)
     
 except Exception as e:
     print(f"Error loading global configuration: {e}")
@@ -98,9 +97,9 @@ except Exception as e:
     CHAINLIT_PORT = 8001
     AUTH_PORT = 8000
     AUTH_REDIRECT_URI = "http://localhost:8000/callback"
-    AUTH_SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 1 week
+    AUTH_SESSION_MAX_AGE = 60 * 60 * 24  # 1 day
     AUTH_TOKEN_FILE = "data/auth_token.json"
-    GSI_CONFIG_PATH = "gamestate_integration_dotact.cfg"
+    GSI_CONFIG_PATH = "gamestate_integration_keenmind.cfg"
     STATE_FILE_PATH = "data/game_state.json"
     GSI_HOST = "127.0.0.1"
     GSI_PORT = 8002

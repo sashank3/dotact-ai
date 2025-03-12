@@ -8,18 +8,16 @@ import sys
 import subprocess
 import time
 import traceback
-import aiohttp
-import asyncio
 import uvicorn
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 from itsdangerous import URLSafeSerializer, BadSignature, SignatureExpired
 import boto3
-from botocore.exceptions import ClientError
 import base64
 import requests
-from urllib.parse import urlencode
 import json
+import webbrowser
+import threading
 
 # Ensure Python can find your "src" folder
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -86,14 +84,20 @@ async def home(request: Request):
         return RedirectResponse(url="/app")
     except (BadSignature, SignatureExpired) as e:
         logger.info(f"No valid session: {str(e)}. Redirecting to login")
-        return RedirectResponse(url="/login/google")
+        return RedirectResponse(url="/direct-login")
 
 @auth_app.get("/login/google")
-async def login_google():
+async def login_google(clear_cookies: bool = False, response: Response = None):
     """Initiate Google OAuth login flow."""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         logger.error("Google OAuth credentials not configured")
         raise HTTPException(status_code=500, detail="Authentication not configured")
+    
+    # Clear cookies if requested
+    if clear_cookies and response:
+        logger.info("Clearing existing session cookies")
+        response.delete_cookie(key="session-data", path="/")
+        response.delete_cookie(key="chainlit-auth-token", path="/")
     
     # Google OAuth authorization URL
     auth_url = "https://accounts.google.com/o/oauth2/auth"
@@ -103,7 +107,7 @@ async def login_google():
         "response_type": "code",
         "scope": "email profile",
         "access_type": "offline",
-        "prompt": "consent",
+        "prompt": "consent",  # Force prompt to ensure we get a refresh token
     }
     
     # Construct the authorization URL with parameters
@@ -245,10 +249,22 @@ async def chainlit_redirect(request: Request):
         
         if not cookie_value:
             logger.error("No session cookie found")
-            return RedirectResponse(url="/login/google")
+            return RedirectResponse(url="/direct-login")
         
         try:
+            # Load session data
             session_data = serializer.loads(cookie_value, max_age=MAX_AGE)
+            
+            # Additional check for token expiration
+            current_time = int(time.time())
+            token_expiry = session_data.get('expires_at', 0)
+            
+            # If token is expired or will expire soon (within 5 minutes)
+            if current_time > (token_expiry - 300):
+                logger.warning(f"Auth token expired or expiring soon. Current time: {current_time}, Expiry: {token_expiry}")
+                # Redirect to direct login which clears cookies and redirects to Google login
+                return RedirectResponse(url="/direct-login")
+                
             logger.info(f"Valid session confirmed for {session_data.get('email')}. Redirecting to Chainlit UI")
             
             # Start Chainlit server if needed
@@ -312,6 +328,31 @@ async def chainlit_redirect(request: Request):
         logger.error(f"Error in /app route: {str(e)}")
         return RedirectResponse(url="/login/google")
 
+@auth_app.get("/direct-login")
+async def direct_login():
+    """
+    Clear cookies via response headers and redirect directly to Google login.
+    This provides a clean entry point when the app launches.
+    """
+    logger.info("Direct login requested - clearing cookies and redirecting to Google authentication")
+    
+    # Create response that redirects to Google login
+    response = RedirectResponse(url="/login/google")
+    
+    # Clear known cookies via response headers
+    response.delete_cookie(key="session-data", path="/")
+    response.delete_cookie(key="chainlit-auth-token", path="/")
+    response.delete_cookie(key="session-data", path="/app")
+    response.delete_cookie(key="chainlit-auth-token", path="/app")
+    
+    # Also try wider path clearing
+    for path in ["/", "/app", "/login", "/callback"]:
+        response.delete_cookie(key="session-data", path=path)
+        response.delete_cookie(key="chainlit-auth-token", path=path)
+    
+    # Return the redirect response with cleared cookies
+    return response
+
 @auth_app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources when the server shuts down."""
@@ -374,6 +415,18 @@ def run_auth_server(host="0.0.0.0", port=None):
         port = AUTH_PORT
         
     logger.info(f"Starting authentication server on port {port}")
+    
+    # Open browser in a separate thread after a short delay
+    def open_browser():
+        time.sleep(1.5)  # Give the server a moment to start
+        url = f"http://localhost:{port}/direct-login"
+        logger.info(f"Opening browser to: {url}")
+        webbrowser.open(url)
+    
+    # Start browser thread
+    browser_thread = threading.Thread(target=open_browser)
+    browser_thread.daemon = True
+    browser_thread.start()
     
     # Use uvicorn.Config and Server classes for thread-safe operation
     config = uvicorn.Config(

@@ -3,6 +3,9 @@ import sys
 import logging
 import threading
 import traceback
+import asyncio
+import signal
+import concurrent.futures
 from dotenv import load_dotenv
 
 # Add src to path
@@ -85,6 +88,26 @@ def start_auth_server():
     auth_thread.start()
     return auth_thread
 
+def setup_event_loop_policy():
+    """Configure the event loop policy for better async behavior."""
+    if sys.platform == 'win32':
+        # On Windows, use ProactorEventLoop which is more efficient
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    
+    # Create a new event loop with larger buffer limits
+    loop = asyncio.new_event_loop()
+    
+    # Set a reasonable default for number of tasks running simultaneously
+    loop.set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(max_workers=min(32, os.cpu_count() + 4))
+    )
+    
+    # Make this the default event loop for the application
+    asyncio.set_event_loop(loop)
+    
+    logging.info("[MAIN] Configured event loop policy")
+    return loop
+
 def start_services():
     """
     Start all required services:
@@ -107,6 +130,28 @@ def start_services():
         "auth": auth_thread
     }
 
+def setup_signal_handlers(service_threads, loop):
+    """Setup signal handlers for clean shutdown."""
+    def shutdown_handler(sig, frame):
+        logging.info(f"[MAIN] Received signal {sig}. Initiating graceful shutdown...")
+        
+        # Shutdown logging system
+        from src.logger.log_manager import log_manager
+        log_manager.shutdown()
+        
+        # Stop the event loop
+        try:
+            loop.stop()
+        except:
+            pass
+        
+        # Exit
+        sys.exit(0)
+    
+    # Register SIGINT and SIGTERM handlers
+    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
+
 def main():
     """
     Main application entry point for Keenmind.
@@ -124,12 +169,18 @@ def main():
         # Setup logging
         setup_logging()
         
+        # Configure event loop policy
+        loop = setup_event_loop_policy()
+        
         # Configure API endpoints
         api_url = setup_api_configuration()
         logging.info(f"[MAIN] API URL configured: {api_url}")
         
         # Start services
         service_threads = start_services()
+        
+        # Setup signal handlers for clean shutdown
+        setup_signal_handlers(service_threads, loop)
         
         # Keep the main thread alive
         logging.info("[MAIN] All services started. Press Ctrl+C to exit.")
@@ -145,6 +196,13 @@ def main():
         logging.error(f"[MAIN] Error in main function: {str(e)}")
         logging.error(traceback.format_exc())
     finally:
+        # Clean up logging system
+        try:
+            from src.logger.log_manager import log_manager
+            log_manager.shutdown()
+        except:
+            pass
+        
         logging.info("[MAIN] Application shutdown complete.")
 
 if __name__ == "__main__":

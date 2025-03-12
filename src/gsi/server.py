@@ -7,7 +7,8 @@ import sys
 import logging
 import json
 import traceback
-from fastapi import FastAPI, Request
+import aiofiles
+from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
@@ -67,9 +68,10 @@ async def receive_game_state(update: GameStateUpdate):
         # Ensure the directory exists
         os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
         
-        # Save the current state to the configured file
-        with open(STATE_FILE_PATH, "w") as f:
-            json.dump(update_dict, f)
+        # Save the current state to the configured file asynchronously
+        async with aiofiles.open(STATE_FILE_PATH, "w") as f:
+            state_json = json.dumps(update_dict, indent=2)
+            await f.write(state_json)
         
         logger.debug(f"Game state updated and saved to {STATE_FILE_PATH}")
         return {"status": "success", "message": "Game state updated"}
@@ -88,8 +90,8 @@ async def startup_event():
     
     # Create an empty state file if it doesn't exist
     if not os.path.exists(STATE_FILE_PATH):
-        with open(STATE_FILE_PATH, "w") as f:
-            json.dump({}, f)
+        async with aiofiles.open(STATE_FILE_PATH, "w") as f:
+            await f.write(json.dumps({}))
         logger.info(f"Created empty game state file at {STATE_FILE_PATH}")
 
 def run_gsi_server(host=None, port=None):

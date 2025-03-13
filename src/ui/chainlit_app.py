@@ -23,7 +23,8 @@ from src.ui.history_manager import save_chat_history
 from src.cloud.api import configure_process_query_api, call_process_query_api
 from src.ui.chainlit_helpers import (
     handle_authentication,
-    log_authentication_status
+    log_authentication_status,
+    process_conversation_history
 )
 
 # Configure module logger - use getLogger instead of basicConfig
@@ -122,9 +123,6 @@ async def on_message(message: cl.Message):
         # Get session data from user_session
         session_data = cl.user_session.get("session_data")
         
-        # Remove session recovery logic
-        # Let authentication flow handle expired sessions naturally
-        
         # Log authentication status
         log_authentication_status(session_data)
         
@@ -132,13 +130,22 @@ async def on_message(message: cl.Message):
         game_state = state_manager.get_state()
         logger.debug(f"Game state: {game_state}")
         
+        # Get conversation history in OpenAI format and process it
+        conversation_history = cl.chat_context.to_openai()
+        processed_history = process_conversation_history(conversation_history, max_interactions=5)
+        
+        # Log only if there's actual history to include
+        if processed_history:
+            logger.debug(f"Including {len(processed_history)} messages from conversation history")
+        
         # Process query using API
         try:
             response = await call_process_query_api(
                 query=message.content,
                 game_state=game_state,
                 user_info=user_info,
-                session_data=session_data
+                session_data=session_data,
+                chat_context=processed_history
             )
             
             # Check for errors

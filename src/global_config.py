@@ -97,10 +97,9 @@ except Exception as e:
     CHAINLIT_PORT = 8001
     AUTH_PORT = 8000
     AUTH_REDIRECT_URI = "http://localhost:8000/callback"
-    AUTH_SESSION_MAX_AGE = 60 * 60 * 24  # 1 day
+    AUTH_SESSION_MAX_AGE = 60 * 60 * 24 * 2 # 1 day
     AUTH_TOKEN_FILE = "data/auth_token.json"
     GSI_CONFIG_PATH = "gamestate_integration_keenmind.cfg"
     STATE_FILE_PATH = "data/game_state.json"
     GSI_HOST = "127.0.0.1"
     GSI_PORT = 8002
-    GSI_LOG_INTERVAL = 60

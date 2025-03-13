@@ -14,7 +14,7 @@ SECRET_KEY = os.getenv("FASTAPI_SECRET_KEY", "default-secret-key")
 serializer = URLSafeSerializer(SECRET_KEY)
 
 # Import from global config
-from src.global_config import AUTH_TOKEN_FILE
+from src.global_config import AUTH_TOKEN_FILE, AUTH_SESSION_MAX_AGE
 
 def handle_authentication():
     """
@@ -27,7 +27,7 @@ def handle_authentication():
     user_info = {"id": None, "name": "Anonymous", "email": "anonymous@example.com"}
     session_data = None
     
-    # Try reading from the auth token file first - our reliable IPC method
+    # Read from the auth token file - our reliable method
     try:
         if os.path.exists(AUTH_TOKEN_FILE):
             with open(AUTH_TOKEN_FILE, 'r') as f:
@@ -36,40 +36,18 @@ def handle_authentication():
                 token_timestamp = token_data.get("timestamp", 0)
                 token_age = int(time.time()) - token_timestamp
                 
-                # Check if token is not too old (max 24 hours)
-                if token_age < 24 * 60 * 60:
+                # Check if token is not too old (max 48 hours)
+                if token_age < AUTH_SESSION_MAX_AGE:
                     logger.info(f"Found auth_token in {AUTH_TOKEN_FILE}. Token age: {token_age} seconds")
                 else:
                     logger.warning(f"Auth token in file is too old ({token_age} seconds). Ignoring.")
                     auth_token = None
     except Exception as e:
         logger.error(f"Error reading auth token from file: {str(e)}")
-        
-    # If token file approach failed, try the URL parameter methods
-    if not auth_token:
-        # Method 1: Try to get URL parameters directly from the URL query in user session
-        url_query = cl.user_session.get("url_query")
-        if url_query and isinstance(url_query, dict) and "auth_token" in url_query:
-            auth_token = url_query.get("auth_token")
-            logger.info(f"Found auth_token in cl.user_session.url_query: Length {len(auth_token) if auth_token else 0}")
-        
-        # Method 2: Try to get the token from environment variables
-        elif os.getenv("CL_URL_PARAMS"):
-            try:
-                url_params = json.loads(os.getenv("CL_URL_PARAMS", "{}"))
-                auth_token = url_params.get("auth_token")
-                logger.info(f"Found auth_token in CL_URL_PARAMS: Length {len(auth_token) if auth_token else 0}")
-            except Exception as e:
-                logger.error(f"Error parsing CL_URL_PARAMS: {str(e)}")
-        
-        # Method 3: Try getting from custom environment variable set by auth.py
-        elif os.getenv("CHAINLIT_AUTH_TOKEN"):
-            auth_token = os.getenv("CHAINLIT_AUTH_TOKEN")
-            logger.info(f"Found auth_token in CHAINLIT_AUTH_TOKEN env var: Length {len(auth_token) if auth_token else 0}")
     
     if auth_token:
         try:
-            # Decode the token - improved error handling
+            # Decode the token
             logger.info(f"Auth token found. Length: {len(auth_token)}")
             try:
                 # First try standard base64 decoding
@@ -95,21 +73,17 @@ def handle_authentication():
                 }
                 logger.info(f"Authenticated user: {user_info['name']} ({user_info['email']})")
                 
-                # Log available tokens for debugging
+                # Log available Google tokens for debugging
                 token_types = []
                 if 'google_id_token' in session_data:
                     token_types.append("Google ID Token")
                 if 'google_access_token' in session_data:
                     token_types.append("Google Access Token")
-                if 'id_token' in session_data:
-                    token_types.append("Cognito ID Token")
-                if 'access_token' in session_data:
-                    token_types.append("Cognito Access Token")
                 
                 if token_types:
                     logger.info(f"Available auth tokens: {', '.join(token_types)}")
                 else:
-                    logger.warning("No authentication tokens found in session data")
+                    logger.warning("No Google authentication tokens found in session data")
                     
             except BadSignature:
                 logger.error("Invalid token signature")
@@ -123,7 +97,7 @@ def handle_authentication():
         except Exception as e:
             logger.error(f"Error processing auth token: {str(e)}")
     else:
-        logger.warning("No auth token found in URL parameters")
+        logger.warning("No auth token found in token file")
         
     return auth_token, user_info, session_data
 
@@ -155,21 +129,47 @@ def log_authentication_status(session_data):
     if not isinstance(session_data, dict):
         logger.error(f"Invalid session data type: {type(session_data)}")
         return
-        
+    
+    # Log basic auth info
     logger.info(f"Using authentication for user: {session_data.get('email', 'unknown')}")
     
-    # Log which tokens we have
-    auth_tokens = []
-    if 'google_id_token' in session_data and session_data['google_id_token']:
-        auth_tokens.append("Google ID Token")
-    if 'google_access_token' in session_data and session_data['google_access_token']:
-        auth_tokens.append("Google Access Token") 
-    if 'id_token' in session_data and session_data['id_token']:
-        auth_tokens.append("Cognito ID Token")
-    if 'access_token' in session_data and session_data['access_token']:
-        auth_tokens.append("Cognito Access Token")
+    # Check for Google tokens only
+    has_google_id = 'google_id_token' in session_data and session_data['google_id_token']
+    has_google_access = 'google_access_token' in session_data and session_data['google_access_token']
     
-    if auth_tokens:
-        logger.info(f"Available auth tokens: {', '.join(auth_tokens)}")
+    if has_google_id or has_google_access:
+        token_types = []
+        if has_google_id:
+            token_types.append("Google ID Token")
+        if has_google_access:
+            token_types.append("Google Access Token")
+        logger.info(f"Available auth tokens: {', '.join(token_types)}")
     else:
-        logger.warning("Session data exists but contains no valid authentication tokens")
+        logger.warning("Session data exists but contains no valid Google authentication tokens")
+
+def process_conversation_history(conversation_history, max_interactions=5):
+    """
+    Process the conversation history to ensure it's properly formatted.
+    
+    Args:
+        conversation_history: List of messages in OpenAI format
+        max_interactions: Maximum number of query/response pairs to include
+        
+    Returns:
+        List of processed messages
+    """
+    if not conversation_history:
+        return []
+    
+    # Ensure we only have user and assistant messages (no system messages)
+    filtered_history = [
+        msg for msg in conversation_history 
+        if msg.get("role") in ["user", "assistant"]
+    ]
+    
+    # Limit to the latest messages (max_interactions * 2 since each interaction is a pair)
+    max_messages = max_interactions * 2
+    if len(filtered_history) > max_messages:
+        filtered_history = filtered_history[-max_messages:]
+    
+    return filtered_history

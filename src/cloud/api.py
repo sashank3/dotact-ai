@@ -71,12 +71,8 @@ async def call_process_query_api(
             user_email = session_data.get('email', 'unknown')
             logger.info(f"Preparing API request with auth for user: {user_email}")
             
-            # List available token types in session_data without logging the actual tokens
+            # List available Google token types without logging the actual tokens
             token_types = []
-            if 'id_token' in session_data and session_data['id_token']:
-                token_types.append('id_token')
-            if 'access_token' in session_data and session_data['access_token']:
-                token_types.append('access_token')
             if 'google_id_token' in session_data and session_data['google_id_token']:
                 token_types.append('google_id_token')
             if 'google_access_token' in session_data and session_data['google_access_token']:
@@ -84,23 +80,15 @@ async def call_process_query_api(
                 
             logger.debug(f"Available token types: {token_types}")
             
-            # Use token selection with fallback priorities
+            # Use token selection with fallback priorities (Google tokens only)
             auth_token = None
             token_source = None
             
-            # Priority 1: Cognito ID token (most secure)
-            if 'id_token' in session_data and session_data['id_token']:
-                auth_token = session_data['id_token']
-                token_source = "cognito_id_token"
-            # Priority 2: Google ID token
-            elif 'google_id_token' in session_data and session_data['google_id_token']:
+            # Priority 1: Google ID token (preferred)
+            if 'google_id_token' in session_data and session_data['google_id_token']:
                 auth_token = session_data['google_id_token']
                 token_source = "google_id_token"
-            # Priority 3: Cognito access token
-            elif 'access_token' in session_data and session_data['access_token']:
-                auth_token = session_data['access_token']
-                token_source = "cognito_access_token"
-            # Priority 4: Google access token
+            # Priority 2: Google access token (fallback)
             elif 'google_access_token' in session_data and session_data['google_access_token']:
                 auth_token = session_data['google_access_token']
                 token_source = "google_access_token"
@@ -112,8 +100,7 @@ async def call_process_query_api(
                     headers["Authorization"] = f"Bearer {auth_token}"
                     
                     # Add X-Auth-Source header for Google tokens
-                    if token_source and token_source.startswith("google_"):
-                        headers["X-Auth-Source"] = "google"
+                    headers["X-Auth-Source"] = "google"
                 else:
                     # Log token format issue without exposing token content
                     token_preview = "empty" if not auth_token else (
@@ -121,7 +108,7 @@ async def call_process_query_api(
                     )
                     logger.warning(f"Invalid token format: {token_preview}")
             else:
-                logger.warning("No valid authentication token found in session data")
+                logger.warning("No valid Google authentication token found in session data")
         else:
             logger.warning("No session data provided. API call will likely fail with 401 Unauthorized")
         
@@ -147,7 +134,7 @@ async def call_process_query_api(
         truncated_payload = payload_str[:200] + "..." if len(payload_str) > 200 else payload_str
         logger.debug(f"Request payload (truncated): {truncated_payload}")
         
-        # Log headers without the full token for security
+        # Create safe headers for logging (reduce duplication)
         safe_headers = headers.copy()
         if 'Authorization' in safe_headers:
             auth_value = safe_headers['Authorization']

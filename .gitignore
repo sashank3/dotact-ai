@@ -179,3 +179,4 @@ chainlit.md
 infra/cdk.out/
 infra/node_modules/
 
+/images

@@ -295,43 +295,44 @@ def _process_ward_and_location_data(minimap_data):
 def build_prompt(user_query, game_state_text):
     """
     Construct a structured list of messages for the Nebius chat endpoint.
-    Based on whether game state data is valid or not, use different prompts.
+    Uses a modular approach to build the system prompt based on conditions.
     """
     # Check if game state has valid data
     has_valid_game_state = not game_state_text.startswith("=== DOTA 2 GAME STATE ===\nNo valid game state data available.")
     
+    # Base system content that's common to all scenarios
+    base_content = [
+        "You are an expert Dota 2 assistant that provides highly relevant game advice. ",
+        "Use the knowledge from Dota 2's latest patch game data for all recommendations. "
+    ]
+    
+    # Context-specific game state prompt
     if has_valid_game_state:
-        system_content = (
-            "You are an expert Dota 2 assistant that provides highly relevant in-game advice. "
-            "Format your response with two main sections:\n\n"
-            "RECOMMENDED ITEMS\n"
-            "• List 2-5 recommended items in order of priority (highest priority first)\n"
-            "• Include a priority rating for each item (Critical, High, Medium, or Low)\n\n"
-            "GAME STRATEGIES\n"
-            "• List 2-5 strategies based on the current game state in order of priority\n"
-            "• Include a priority rating for each strategy (Critical, High, Medium, or Low)\n\n"
-            "Keep explanations clear and concise, prioritize high-impact recommendations, "
-            "and ensure advice is immediately actionable based on the current game state.\n\n"
-            "If the query is NOT related to Dota 2, respond only with: \"I'm a Dota 2 assistant and can only "
-            "provide information related to Dota 2. Please ask me about heroes, items, strategies, or other "
-            "game-related topics.\""
-        )
+        game_state_prompt = ["providing in-game advice based on the current game state. "]
     else:
-        system_content = (
-            "You are an expert Dota 2 assistant providing general game advice. "
-            "Since no specific game data is available, offer generic Dota 2 guidance.\n\n"
-            "Format your response with two main sections:\n\n"
-            "RECOMMENDED ITEMS\n"
-            "• List 2-5 generally useful items in order of priority (highest priority first)\n"
-            "• Include a priority rating for each item (Critical, High, Medium, or Low)\n\n"
-            "GAME STRATEGIES\n"
-            "• List 2-5 general Dota 2 strategies in order of priority\n"
-            "• Include a priority rating for each strategy (Critical, High, Medium, or Low)\n\n"
-            "Keep explanations clear and concise. Do not use explicit markdown formatting.\n\n"
-            "If the query is NOT related to Dota 2, respond only with: \"I'm a Dota 2 assistant and can only "
-            "provide information related to Dota 2. Please ask me about heroes, items, strategies, or other "
-            "game-related topics.\""
-        )
+        game_state_prompt = ["providing general game advice since no specific game data is available. "]
+    
+    # Response format guidance
+    format_guidance = [
+        "Your response should address the player's query directly. ",
+        "If the query is about items or strategy, format your response with these sections:\n\n",
+        "RECOMMENDED ITEMS\n",
+        "• List 2-5 recommended items in order of priority (highest priority first)\n",
+        "• Include a priority rating for each item (Critical, High, Medium, or Low)\n\n",
+        "GAME STRATEGIES\n",
+        "• List 2-5 strategies in order of priority\n",
+        "• Include a priority rating for each strategy (Critical, High, Medium, or Low)\n\n",
+        "If the query is a specific Dota 2 question (e.g., 'Does Linkens Sphere block Echo Slam?'), ",
+        "answer directly without using the sections above.\n\n",
+        "Keep explanations clear and concise, prioritize high-impact recommendations, ",
+        "and ensure advice is immediately actionable.\n\n",
+        "If the query is NOT related to Dota 2, respond only with: \"I'm a Dota 2 assistant and can only ",
+        "provide information related to Dota 2. Please ask me about heroes, items, strategies, or other ",
+        "game-related topics.\""
+    ]
+    
+    # Combine all prompt elements
+    system_content = "".join(base_content + game_state_prompt + format_guidance)
     
     return [
         {
@@ -487,7 +488,7 @@ def handler(event, context):
         query = body.get('query')
         game_state = body.get('game_state', {})
         user_info = body.get('user_info', {})
-        chat_context = body.get('chat_context', [])  # Get chat context from request
+        chat_context = body.get('chat_context', [])
         
         if not query:
             return {

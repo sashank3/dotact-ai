@@ -134,12 +134,32 @@ jobs:
           # Add certificate to trusted root
           Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\LocalMachine\Root -Password $password
           
-          # Sign the executable
-          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.18362.0\x64\signtool.exe"
-          if (-not (Test-Path $signtool)) {
-            $signtool = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" | Select-Object -First 1).FullName
+          # Sign the executable - fixed to ensure proper architecture
+          $signtoolPath = $null
+          $possiblePaths = @(
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.18362.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
+          )
+          
+          foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+              $signtoolPath = $path
+              break
+            }
           }
-          & $signtool sign /f $pfxPath /p "password" /t http://timestamp.digicert.com /fd sha256 dist\keenmind.exe
+          
+          if (-not $signtoolPath) {
+            Write-Host "Searching for signtool.exe in Windows Kits directory..."
+            $signtoolPath = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1).FullName
+          }
+          
+          if ($signtoolPath) {
+            Write-Host "Using signtool at: $signtoolPath"
+            & $signtoolPath sign /f $pfxPath /p "password" /t http://timestamp.digicert.com /fd sha256 dist\keenmind.exe
+          } else {
+            Write-Host "Signtool.exe not found. Skipping code signing."
+          }
         shell: pwsh
         continue-on-error: true
       
@@ -252,7 +272,8 @@ jobs:
 
       - name: Build Inno Setup installer
         run: |
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" inno_setup.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" inno_setup.iss
+        shell: pwsh
           
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4

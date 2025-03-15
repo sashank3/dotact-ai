@@ -93,33 +93,34 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --clean ^
-            --name keenmind ^
-            --icon="resources/app_icon.ico" ^
-            --add-data "src/gsi;src/gsi" ^
-            --add-data "src/ui;src/ui" ^
-            --add-data "src/cloud;src/cloud" ^
-            --add-data "src/logger;src/logger" ^
-            --add-data "images;images" ^
-            --hidden-import=fastapi ^
-            --hidden-import=chainlit ^
-            --hidden-import=aiofiles ^
-            --hidden-import=boto3 ^
-            --hidden-import=uvicorn.logging ^
-            --hidden-import=uvicorn.loops ^
-            --hidden-import=uvicorn.loops.auto ^
-            --hidden-import=uvicorn.protocols ^
-            --hidden-import=uvicorn.protocols.http ^
-            --hidden-import=uvicorn.protocols.http.auto ^
-            --hidden-import=uvicorn.lifespan ^
-            --hidden-import=uvicorn.workers ^
-            --hidden-import=pydantic ^
-            --collect-all chainlit ^
-            --noconfirm ^
-            --windowed ^
-            --version-file="file_version_info.txt" ^
-            --onefile ^
+          pyinstaller --clean `
+            --name keenmind `
+            --icon="resources/app_icon.ico" `
+            --add-data "src/gsi;src/gsi" `
+            --add-data "src/ui;src/ui" `
+            --add-data "src/cloud;src/cloud" `
+            --add-data "src/logger;src/logger" `
+            --add-data "images;images" `
+            --hidden-import=fastapi `
+            --hidden-import=chainlit `
+            --hidden-import=aiofiles `
+            --hidden-import=boto3 `
+            --hidden-import=uvicorn.logging `
+            --hidden-import=uvicorn.loops `
+            --hidden-import=uvicorn.loops.auto `
+            --hidden-import=uvicorn.protocols `
+            --hidden-import=uvicorn.protocols.http `
+            --hidden-import=uvicorn.protocols.http.auto `
+            --hidden-import=uvicorn.lifespan `
+            --hidden-import=uvicorn.workers `
+            --hidden-import=pydantic `
+            --collect-all chainlit `
+            --noconfirm `
+            --windowed `
+            --version-file="file_version_info.txt" `
+            --onefile `
             src/main.py
+        shell: pwsh
       
       - name: Create self-signed certificate
         run: |

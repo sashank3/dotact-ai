@@ -30,6 +30,12 @@ from src.global_config import (
     AUTH_REDIRECT_URI, 
     AUTH_SESSION_MAX_AGE,
     AUTH_TOKEN_FILE,
+    FASTAPI_SECRET_KEY,
+    COGNITO_USER_POOL_ID,
+    COGNITO_CLIENT_ID,
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    AWS_REGION
 )
 
 # Configure logging
@@ -42,15 +48,9 @@ logger.info(f"Using Auth port: {AUTH_PORT}")
 logger.info(f"Using Auth redirect URI: {AUTH_REDIRECT_URI}")
 
 # Constants
-SECRET_KEY = os.getenv("FASTAPI_SECRET_KEY", "default-secret-key")
+SECRET_KEY = FASTAPI_SECRET_KEY
 MAX_AGE = AUTH_SESSION_MAX_AGE
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 REDIRECT_URI = AUTH_REDIRECT_URI
-
-# Cognito configuration
-COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID")
-COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
 
 # Create serializer for secure cookie data
 serializer = URLSafeSerializer(SECRET_KEY)
@@ -66,7 +66,7 @@ chainlit_process = None
 cognito_client = None
 if COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID:
     try:
-        cognito_client = boto3.client('cognito-idp', region_name=os.getenv("AWS_REGION", "us-east-2"))
+        cognito_client = boto3.client('cognito-idp', region_name=AWS_REGION)
         logger.info("Cognito client initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize Cognito client: {str(e)}")
@@ -155,7 +155,7 @@ async def oauth_callback(code: str, request: Request, response: Response):
                 try:
                     # List users with filter by email
                     user_response = cognito_client.list_users(
-                        UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
+                        UserPoolId=COGNITO_USER_POOL_ID,
                         Filter=f'email = "{user_email}"'
                     )
                     
@@ -166,7 +166,7 @@ async def oauth_callback(code: str, request: Request, response: Response):
                         # Create new user in Cognito
                         try:
                             create_response = cognito_client.admin_create_user(
-                                UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
+                                UserPoolId=COGNITO_USER_POOL_ID,
                                 Username=user_email,
                                 UserAttributes=[
                                     {'Name': 'email', 'Value': user_email},
@@ -182,7 +182,7 @@ async def oauth_callback(code: str, request: Request, response: Response):
                             import secrets
                             temp_password = secrets.token_urlsafe(16)
                             cognito_client.admin_set_user_password(
-                                UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
+                                UserPoolId=COGNITO_USER_POOL_ID,
                                 Username=cognito_user_id,
                                 Password=temp_password,
                                 Permanent=True

@@ -6,24 +6,19 @@ import traceback
 import asyncio
 import signal
 import concurrent.futures
-from dotenv import load_dotenv
 
 # Add src to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def setup_environment():
-    """Set up the environment by loading environment variables."""
-    load_dotenv()
-    
-    # Basic logging setup with debug level
-    logging.basicConfig(
-        level=logging.DEBUG,  # Changed from INFO to DEBUG
-        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
-    )
-    logging.info("[MAIN] Environment variables loaded from .env file")
-
 def setup_logging():
     """Initialize the logging system using global configuration."""
+    # Basic logging setup with debug level before we import other modules
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+    )
+    
+    # Now import and configure advanced logging
     from src.logger.log_manager import log_manager  # ← Triggers initialization
     from src.global_config import LOGGING_CONFIG
     
@@ -31,10 +26,36 @@ def setup_logging():
     logging.info(f"[MAIN] Setting up logging with config: {LOGGING_CONFIG}")
     logging.info("[MAIN] Logging system initialized")
 
+# Import global AWS configuration so it's available to all modules that need it
+def configure_aws():
+    """Configure AWS SDK with credentials from config file.
+    
+    We're not returning a session but making sure the AWS SDK
+    has the right credentials available globally.
+    """
+    from src.global_config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+    import boto3
+    
+    # Set defaults for boto3 that will apply to all clients and resources
+    # This is thread-safe and will be used by any boto3 client created in any thread
+    if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
+        boto3.setup_default_session(
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION
+        )
+        logging.info("[MAIN] AWS SDK configured with explicit credentials")
+    else:
+        boto3.setup_default_session(region_name=AWS_REGION)
+        logging.info("[MAIN] AWS SDK configured using default credential resolution")
+
 def setup_api_configuration():
     """Configure API endpoints for cloud services."""
     from src.cloud.api import configure_process_query_api
-    api_url = configure_process_query_api()
+    from src.global_config import PROCESS_QUERY_API_URL
+    
+    # Pass the pre-configured API URL from global config
+    api_url = configure_process_query_api(process_query_url=PROCESS_QUERY_API_URL)
     return api_url
 
 def setup_gsi_files():
@@ -157,17 +178,17 @@ def main():
     Main application entry point for Keenmind.
     
     This function orchestrates the startup sequence:
-    1. Load environment variables
-    2. Set up logging
+    1. Set up logging
+    2. Configure AWS SDK globally
     3. Configure API endpoints
     4. Start required services
     """
     try:
-        # Setup environment
-        setup_environment()
-        
-        # Setup logging
+        # Setup logging first
         setup_logging()
+        
+        # Configure AWS SDK globally for any thread that needs it
+        configure_aws()
         
         # Configure event loop policy
         loop = setup_event_loop_policy()

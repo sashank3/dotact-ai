@@ -9,12 +9,11 @@ import chainlit as cl
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Create serializer for secure cookie data (must match auth.py)
-SECRET_KEY = os.getenv("FASTAPI_SECRET_KEY", "default-secret-key")
-serializer = URLSafeSerializer(SECRET_KEY)
-
 # Import from global config
-from src.global_config import AUTH_TOKEN_FILE, AUTH_SESSION_MAX_AGE
+from src.global_config import AUTH_TOKEN_FILE, AUTH_SESSION_MAX_AGE, FASTAPI_SECRET_KEY
+
+# Create serializer for secure cookie data (must match auth.py)
+serializer = URLSafeSerializer(FASTAPI_SECRET_KEY)
 
 def handle_authentication():
     """

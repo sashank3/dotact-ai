@@ -2,10 +2,13 @@ name: Build EXE
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags
+      - 'v*.*.*'
+  workflow_dispatch:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write  # Add this line to grant write access to repository contents
     
     steps:
       - uses: actions/checkout@v3
@@ -20,24 +23,300 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller
           pip install aiofiles==23.2.1 aiohttp==3.11.13 boto3==1.37.4 chainlit==2.2.1 fastapi==0.115.8 itsdangerous==2.2.0 numpy==2.2.2 openai==1.61.1 python-dotenv==1.0.1 python-jose==3.4.0 pyyaml==6.0.2 requests==2.32.3 uvicorn==0.34.0
-          
-      - name: Build with PyInstaller
-        run: |
-          pyinstaller --onefile --name keenmind --hidden-import=fastapi --hidden-import=chainlit --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=uvicorn.lifespan src/main/main.py
-          
+      
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
         shell: bash
+      
+      - name: Create version file
+        run: |
+          echo "__version__ = '${{ env.VERSION }}'" > src/version.py
+      
+      - name: Prepare app icon
+        run: |
+          # Convert PNG to ICO format
+          pip install pillow
+          mkdir -p resources
+          python -c "from PIL import Image; img = Image.open('images/app_logo.png'); img.save('resources/app_icon.ico')"
+        continue-on-error: true
+
+      - name: Generate file version info
+        run: |
+          echo "# UTF-8
+          #
+          # For more details about fixed file info 'ffi' see:
+          # http://msdn.microsoft.com/en-us/library/ms646997.aspx
+          VSVersionInfo(
+            ffi=FixedFileInfo(
+              # filevers and prodvers should be always a tuple with four items: (1, 2, 3, 4)
+              # Set not needed items to zero 0.
+              filevers=(${{ env.VERSION.replace('.',',') }},0),
+              prodvers=(${{ env.VERSION.replace('.',',') }},0),
+              # Contains a bitmask that specifies the valid bits 'flags'r
+              mask=0x3f,
+              # Contains a bitmask that specifies the Boolean attributes of the file.
+              flags=0x0,
+              # The operating system for which this file was designed.
+              # 0x4 - NT and there is no need to change it.
+              OS=0x40004,
+              # The general type of file.
+              # 0x1 - the file is an application.
+              fileType=0x1,
+              # The function of the file.
+              # 0x0 - the function is not defined for this fileType
+              subtype=0x0,
+              # Creation date and time stamp.
+              date=(0, 0)
+            ),
+            kids=[
+              StringFileInfo(
+                [
+                StringTable(
+                  u'040904E4',
+                  [StringStruct(u'CompanyName', u'DotACT AI'),
+                  StringStruct(u'FileDescription', u'Keenmind - AI Assistant for Dota 2'),
+                  StringStruct(u'FileVersion', u'${{ env.VERSION }}'),
+                  StringStruct(u'InternalName', u'keenmind'),
+                  StringStruct(u'LegalCopyright', u'Copyright © 2023 DotACT AI'),
+                  StringStruct(u'OriginalFilename', u'keenmind.exe'),
+                  StringStruct(u'ProductName', u'Keenmind'),
+                  StringStruct(u'ProductVersion', u'${{ env.VERSION }}')])
+                ]), 
+              VarFileInfo([VarStruct(u'Translation', [1033, 1252])])
+            ]
+          )" > file_version_info.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --clean ^
+            --name keenmind ^
+            --icon="resources/app_icon.ico" ^
+            --add-data "src/gsi;src/gsi" ^
+            --add-data "src/ui;src/ui" ^
+            --add-data "src/cloud;src/cloud" ^
+            --add-data "src/logger;src/logger" ^
+            --add-data "images;images" ^
+            --hidden-import=fastapi ^
+            --hidden-import=chainlit ^
+            --hidden-import=aiofiles ^
+            --hidden-import=boto3 ^
+            --hidden-import=uvicorn.logging ^
+            --hidden-import=uvicorn.loops ^
+            --hidden-import=uvicorn.loops.auto ^
+            --hidden-import=uvicorn.protocols ^
+            --hidden-import=uvicorn.protocols.http ^
+            --hidden-import=uvicorn.protocols.http.auto ^
+            --hidden-import=uvicorn.lifespan ^
+            --hidden-import=uvicorn.workers ^
+            --hidden-import=pydantic ^
+            --collect-all chainlit ^
+            --noconfirm ^
+            --windowed ^
+            --version-file="file_version_info.txt" ^
+            --onefile ^
+            src/main.py
+      
+      - name: Create self-signed certificate
+        run: |
+          # Create a new self-signed certificate for code signing
+          $cert = New-SelfSignedCertificate -Subject "CN=DotACT AI, O=DotACT AI" -Type CodeSigning -CertStoreLocation Cert:\CurrentUser\My
+          $certPath = "Cert:\CurrentUser\My\$($cert.Thumbprint)"
+          $pfxPath = "codesign.pfx"
+          $password = ConvertTo-SecureString -String "password" -Force -AsPlainText
+          Export-PfxCertificate -Cert $certPath -FilePath $pfxPath -Password $password
           
-      - name: Upload artifact
-        uses: actions/upload-artifact@v3
+          # Add certificate to trusted root
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\LocalMachine\Root -Password $password
+          
+          # Sign the executable
+          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.18362.0\x64\signtool.exe"
+          if (-not (Test-Path $signtool)) {
+            $signtool = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" | Select-Object -First 1).FullName
+          }
+          & $signtool sign /f $pfxPath /p "password" /t http://timestamp.digicert.com /fd sha256 dist\keenmind.exe
+        shell: pwsh
+        continue-on-error: true
+      
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+          
+      - name: Create Inno Setup script
+        run: |
+          echo '[Setup]
+          AppName=Keenmind
+          AppVersion=${{ env.VERSION }}
+          DefaultDirName={pf}\Keenmind
+          DefaultGroupName=Keenmind
+          UninstallDisplayIcon={app}\keenmind.exe
+          OutputDir=.
+          OutputBaseFilename=keenmind_setup_${{ env.VERSION }}
+          Compression=lzma
+          SolidCompression=yes
+          PrivilegesRequired=admin
+          WizardStyle=modern
+          SetupIconFile=resources\app_icon.ico
+
+          [Files]
+          Source: "dist\keenmind.exe"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "images\app_logo.png"; DestDir: "{app}\images"; Flags: ignoreversion
+
+          [Icons]
+          Name: "{group}\Keenmind"; Filename: "{app}\keenmind.exe"
+          Name: "{commondesktop}\Keenmind"; Filename: "{app}\keenmind.exe"
+
+          [Code]
+          var
+            SteamPathPage: TInputDirWizardPage;
+            DefaultSteamPath: String;
+
+          procedure InitializeWizard;
+          begin
+            { Create Steam path selection page }
+            SteamPathPage := CreateInputDirPage(wpSelectDir,
+              ''Steam Installation Folder'', 
+              ''Where is Steam installed on your computer?'',
+              ''The installer needs to know where Steam is installed to configure Dota 2 Game State Integration.' + #13#10 +
+              ''Please specify the location of your Steam installation folder (not the Dota 2 folder):'',
+              False, '''');
+              
+            { Set default Steam path - common locations }
+            if DirExists(ExpandConstant(''{pf}\Steam'')) then
+              DefaultSteamPath := ExpandConstant(''{pf}\Steam'')
+            else if DirExists(ExpandConstant(''{pf(x86)}\Steam'')) then
+              DefaultSteamPath := ExpandConstant(''{pf(x86)}\Steam'')
+            else if DirExists(ExpandConstant(''C:\Program Files\Steam'')) then
+              DefaultSteamPath := ''C:\Program Files\Steam''
+            else if DirExists(ExpandConstant(''C:\Program Files (x86)\Steam'')) then
+              DefaultSteamPath := ''C:\Program Files (x86)\Steam''
+            else
+              DefaultSteamPath := ExpandConstant(''{pf(x86)}\Steam'');
+              
+            SteamPathPage.Add('''');
+            SteamPathPage.Values[0] := DefaultSteamPath;
+          end;
+
+          function NextButtonClick(CurPageID: Integer): Boolean;
+          var
+            SteamPath, GsiConfigPath, YamlContent: String;
+            YamlFile: String;
+          begin
+            Result := True;
+            
+            if CurPageID = SteamPathPage.ID then
+            begin
+              { Validate Steam path }
+              SteamPath := SteamPathPage.Values[0];
+              if not DirExists(SteamPath) then
+              begin
+                MsgBox(''The specified Steam folder does not exist. Please select a valid Steam installation folder.'', mbError, MB_OK);
+                Result := False;
+                Exit;
+              end;
+              
+              { Check for steamapps folder }
+              if not DirExists(SteamPath + ''\steamapps'') then
+              begin
+                MsgBox(''This does not appear to be a valid Steam installation. The steamapps folder was not found.'', mbError, MB_OK);
+                Result := False;
+                Exit;
+              end;
+              
+              { Save GSI config path to YAML file that will be included with the app }
+              GsiConfigPath := SteamPath + ''\steamapps\common\dota 2 beta\game\dota\cfg\gamestate_integration'';
+              
+              { Create GSI path if it doesn''t exist }
+              ForceDirectories(ExpandConstant(''{app}\config''));
+              YamlFile := ExpandConstant(''{app}\config\steam_path.yaml'');
+              
+              { Create YAML content }
+              YamlContent := ''steam:' + #13#10 + 
+                             '  path: "'' + SteamPath + ''"' + #13#10 +
+                             '  gsi_path: "'' + GsiConfigPath + ''"' + #13#10;
+              
+              { Save YAML file }
+              if not SaveStringToFile(YamlFile, YamlContent, False) then
+              begin
+                MsgBox(''Failed to save Steam path configuration. Please try again.'', mbError, MB_OK);
+                Result := False;
+              end;
+            end;
+          end;
+          ' > inno_setup.iss
+
+      - name: Build Inno Setup installer
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" inno_setup.iss
+          
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: keenmind-${{ env.VERSION }}
+          name: keenmind-exe-${{ env.VERSION }}
           path: dist/keenmind.exe
+          
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keenmind-installer-${{ env.VERSION }}
+          path: keenmind_setup_${{ env.VERSION }}.exe
           
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/keenmind.exe
+          files: |
+            dist/keenmind.exe
+            keenmind_setup_${{ env.VERSION }}.exe
           name: Release ${{ env.VERSION }}
+          body: |
+            # Keenmind Release ${{ env.VERSION }}
+            
+            This release contains the Keenmind AI Assistant for Dota 2.
+            
+            ## Installer Instructions (Recommended)
+            1. Download the `keenmind_setup_${{ env.VERSION }}.exe` file
+            2. Right-click and select "Properties"
+            3. Check "Unblock" if available
+            4. Click "OK"
+            5. Run the installer
+            6. Follow the installation steps, including selecting your Steam folder location
+            
+            ## Manual Installation (Advanced Users)
+            If you prefer not to use the installer, you can download the standalone executable:
+            1. Download the `keenmind.exe` file
+            2. Right-click and select "Properties"
+            3. Check "Unblock" if available
+            4. Click "OK"
+            5. Run the application
+            6. You'll need to manually configure your Steam path in the application settings
+            
+            Note: Windows SmartScreen or your antivirus may show a warning when running this for the first time.
+            This is normal for applications without an Extended Validation (EV) code signing certificate.
+            You can safely click "More info" and then "Run anyway" in the SmartScreen dialog.
+
+      - name: Create secrets configuration
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          # Create the cloud directory if it doesn't exist
+          New-Item -Path "src/cloud" -ItemType Directory -Force
+          
+          # Create secrets_config.yaml with GitHub secrets
+          $secretsContent = @"
+          # AWS Credentials
+          aws:
+            access_key_id: $env:AWS_ACCESS_KEY_ID
+            secret_access_key: $env:AWS_SECRET_ACCESS_KEY
+            region: us-east-2
+
+          # Google OAuth
+          google_oauth:
+            client_id: $env:GOOGLE_CLIENT_ID
+            client_secret: $env:GOOGLE_CLIENT_SECRET
+          "@
+          
+          Set-Content -Path "src/cloud/secrets_config.yaml" -Value $secretsContent
+          Write-Host "Created secrets configuration for build"

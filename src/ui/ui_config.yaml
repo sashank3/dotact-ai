@@ -8,3 +8,4 @@ auth:
   redirect_uri: "http://localhost:8000/callback"
   session_max_age: 604800  # 1 week in seconds
   token_file: "data/auth_token.json"  # File to store authentication token for inter-process communication 
+  fastapi_secret_key: "2uvI1zJnlUzn_pWb5LtyG7FjwcDLeMQrnywSbbzHKUM"

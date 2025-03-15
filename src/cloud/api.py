@@ -9,31 +9,36 @@ import aiohttp
 import traceback
 from typing import Optional, Dict, Any
 
+# Import from global configuration
+from src.global_config import PROCESS_QUERY_API_URL, API_BASE_URL
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def configure_process_query_api() -> str:
+def configure_process_query_api(process_query_url=None) -> str:
     """
     Configure the API endpoint for processing queries.
     
+    Args:
+        process_query_url: Optional URL to override the one from configuration
+        
     Returns:
         str: The configured API endpoint URL
     """
-    # Get API base URL from environment
-    api_base_url = os.getenv("API_BASE_URL")
-    process_query_api_url = os.getenv("PROCESS_QUERY_API_URL")
+    # Use provided URL or get from global config
+    api_url = process_query_url or PROCESS_QUERY_API_URL
     
-    # If PROCESS_QUERY_API_URL is not set but API_BASE_URL is available, construct it
-    if not process_query_api_url and api_base_url:
-        process_query_api_url = f"{api_base_url}/process-query"
-        logger.info(f"Constructed process query API URL: {process_query_api_url}")
+    # If not set but API_BASE_URL is available, construct it
+    if not api_url and API_BASE_URL:
+        api_url = f"{API_BASE_URL}/process-query"
+        logger.info(f"Constructed process query API URL: {api_url}")
     
-    if not process_query_api_url:
+    if not api_url:
         logger.warning("No API URL configured for process-query. API calls will fail.")
     else:
-        logger.info(f"Using process query API URL: {process_query_api_url}")
+        logger.info(f"Using process query API URL: {api_url}")
     
-    return process_query_api_url
+    return api_url
 
 async def call_process_query_api(
     query: str, 

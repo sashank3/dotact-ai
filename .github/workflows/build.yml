@@ -118,7 +118,8 @@ jobs:
             --noconfirm `
             --windowed `
             --version-file="file_version_info.txt" `
-            --onefile `
+            --uac-admin `
+            --noupx `
             src/main.py
         shell: pwsh
       
@@ -184,7 +185,7 @@ jobs:
           SetupIconFile=resources\app_icon.ico
 
           [Files]
-          Source: "dist\keenmind.exe"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "dist\keenmind\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
           Source: "images\app_logo.png"; DestDir: "{app}\images"; Flags: ignoreversion
 
           [Icons]
@@ -273,6 +274,11 @@ jobs:
       - name: Build Inno Setup installer
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" inno_setup.iss
+        shell: pwsh
+
+      - name: List build artifacts
+        run: |
+          Get-ChildItem -Path dist -Recurse | Format-Table -Property FullName
         shell: pwsh
           
       - name: Upload EXE artifact

@@ -43,6 +43,9 @@ jobs:
 
       - name: Generate file version info
         run: |
+          $version = "${{ env.VERSION }}"
+          $version_comma = $version.Replace(".", ",")
+          
           echo "# UTF-8
           #
           # For more details about fixed file info 'ffi' see:
@@ -51,8 +54,8 @@ jobs:
             ffi=FixedFileInfo(
               # filevers and prodvers should be always a tuple with four items: (1, 2, 3, 4)
               # Set not needed items to zero 0.
-              filevers=(${{ env.VERSION.replace('.',',') }},0),
-              prodvers=(${{ env.VERSION.replace('.',',') }},0),
+              filevers=($version_comma,0),
+              prodvers=($version_comma,0),
               # Contains a bitmask that specifies the valid bits 'flags'r
               mask=0x3f,
               # Contains a bitmask that specifies the Boolean attributes of the file.
@@ -86,6 +89,7 @@ jobs:
               VarFileInfo([VarStruct(u'Translation', [1033, 1252])])
             ]
           )" > file_version_info.txt
+        shell: pwsh
 
       - name: Build with PyInstaller
         run: |
@@ -177,7 +181,7 @@ jobs:
             SteamPathPage := CreateInputDirPage(wpSelectDir,
               ''Steam Installation Folder'', 
               ''Where is Steam installed on your computer?'',
-              ''The installer needs to know where Steam is installed to configure Dota 2 Game State Integration.' + #13#10 +
+              ''The installer needs to know where Steam is installed to configure Dota 2 Game State Integration.'' + #13#10 +
               ''Please specify the location of your Steam installation folder (not the Dota 2 folder):'',
               False, '''');
               
@@ -231,9 +235,9 @@ jobs:
               YamlFile := ExpandConstant(''{app}\config\steam_path.yaml'');
               
               { Create YAML content }
-              YamlContent := ''steam:' + #13#10 + 
-                             '  path: "'' + SteamPath + ''"' + #13#10 +
-                             '  gsi_path: "'' + GsiConfigPath + ''"' + #13#10;
+              YamlContent := ''steam:'' + #13#10 + 
+                             ''  path: "'' + SteamPath + ''"'' + #13#10 +
+                             ''  gsi_path: "'' + GsiConfigPath + ''"'' + #13#10;
               
               { Save YAML file }
               if not SaveStringToFile(YamlFile, YamlContent, False) then

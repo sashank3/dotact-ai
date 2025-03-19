@@ -7,6 +7,7 @@ import aiofiles
 from typing import Optional, Dict
 from threading import Lock
 from src.global_config import STATE_FILE_PATH
+import time
 
 
 # Configure logging
@@ -156,7 +157,24 @@ class StateManager:
                 async with aiofiles.open(self.state_file, mode='r') as f:
                     contents = await f.read()
                     if contents:  # Check if file is not empty
-                        self.state = json.loads(contents)
+                        try:
+                            self.state = json.loads(contents)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Error parsing state file: {str(e)}")
+                            logger.warning("Backing up corrupted state file and starting with empty state")
+                            
+                            # Backup the corrupted file
+                            backup_file = f"{self.state_file}.backup.{int(time.time())}"
+                            try:
+                                # Use aiofiles to write the backup
+                                async with aiofiles.open(backup_file, mode='w') as backup:
+                                    await backup.write(contents)
+                                logger.info(f"Backed up corrupted state file to {backup_file}")
+                            except Exception as backup_err:
+                                logger.error(f"Failed to backup corrupted state file: {str(backup_err)}")
+                            
+                            # Start with empty state
+                            self.state = {}
                     else:
                         self.state = {}  # Handle empty file case
 

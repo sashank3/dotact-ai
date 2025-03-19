@@ -7,24 +7,40 @@ import asyncio
 import signal
 import concurrent.futures
 
-# Add src to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the project root to the Python path in development environment
+# This must happen BEFORE any "src." imports
+if not getattr(sys, 'frozen', False):
+    # Get the absolute path to the project root (two directories up from main.py)
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    sys.path.append(project_root)
+    print(f"Development mode: Added {project_root} to Python path")
+
+# Now we can safely import from src
+from src.exe.app_dirs import APP_DIRS, IS_FROZEN
+from src.exe.logging_setup import configure_logging
+from src.exe.config_manager import ensure_default_configs
 
 def setup_logging():
     """Initialize the logging system using global configuration."""
-    # Basic logging setup with debug level before we import other modules
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
-    )
+    # Configure basic logging with proper directories
+    from src.exe.logging_setup import configure_logging
+    log_info = configure_logging()
     
-    # Now import and configure advanced logging
-    from src.logger.log_manager import log_manager  # ← Triggers initialization
+    # Now import and configure advanced logging via log_manager
+    # This will use the session directory created in configure_logging
+    from src.logger.log_manager import log_manager
     from src.global_config import LOGGING_CONFIG
     
-    # Apply logging configuration from global config
-    logging.info(f"[MAIN] Setting up logging with config: {LOGGING_CONFIG}")
-    logging.info("[MAIN] Logging system initialized")
+    # Log key information
+    logging.info(f"[MAIN] Logging system initialized with session: {log_info['session_dir']}")
+    logging.info(f"[MAIN] Application directories: {APP_DIRS}")
+    logging.info("[MAIN] Full logging system initialized")
+
+def setup_configs():
+    """Set up configuration files."""
+    # Ensure default configs are available
+    ensure_default_configs()
+    logging.info("[MAIN] Configuration setup complete")
 
 # Import global AWS configuration so it's available to all modules that need it
 def configure_aws():
@@ -179,13 +195,17 @@ def main():
     
     This function orchestrates the startup sequence:
     1. Set up logging
-    2. Configure AWS SDK globally
-    3. Configure API endpoints
-    4. Start required services
+    2. Set up configuration files
+    3. Configure AWS SDK globally
+    4. Configure API endpoints
+    5. Start required services
     """
     try:
         # Setup logging first
         setup_logging()
+        
+        # Ensure configs are properly set up
+        setup_configs()
         
         # Configure AWS SDK globally for any thread that needs it
         configure_aws()

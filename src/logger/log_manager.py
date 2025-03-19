@@ -7,6 +7,7 @@ from datetime import datetime
 from functools import wraps
 from logging.handlers import QueueHandler, QueueListener
 from src.global_config import LOGGING_CONFIG
+from src.exe.app_dirs import APP_DIRS, IS_FROZEN
 
 class LogManager:
     _instance = None
@@ -18,26 +19,26 @@ class LogManager:
         return cls._instance
     
     def _initialize(self):
+        # Get the base logs directory from APP_DIRS
+        logs_dir = APP_DIRS['logs_dir']
+        
+        # Check if session directory already exists in environment
         if "SESSION_DIR" in os.environ:
             self.session_dir = os.environ["SESSION_DIR"]
-            # Re-initialize file paths from existing session dir
-            self.log_file = os.path.join(self.session_dir, "app.log")
-            self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
         else:
-            # Only create new session dir if not already set
-            base_logs_dir = LOGGING_CONFIG["logs_dir"]
-            os.makedirs(base_logs_dir, exist_ok=True)
-            
+            # Create a new session directory
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.session_dir = os.path.join(base_logs_dir, f"session_{timestamp}")
+            self.session_dir = os.path.join(logs_dir, f"session_{timestamp}")
             os.makedirs(self.session_dir, exist_ok=True)
-            
-            self.log_file = os.path.join(self.session_dir, "app.log")
-            self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
-            
             os.environ["SESSION_DIR"] = self.session_dir  # Set for child processes
         
-        # Configure logging - always do this regardless of whether session dir already exists
+        # Set up log file paths within the session directory
+        self.app_log_file = os.path.join(self.session_dir, "app.log")
+        self.debug_log_file = os.path.join(self.session_dir, "debug.log")
+        self.error_log_file = os.path.join(self.session_dir, "error.log")  # Renamed from keenmind.log
+        self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
+        
+        # Configure logging
         self._configure_logging()
         
         logging.info(f"[LOG MANAGER] Session directory: {self.session_dir}")
@@ -48,23 +49,57 @@ class LogManager:
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
 
-        # Create log formatter
-        formatter = logging.Formatter(LOGGING_CONFIG["format"])
+        # Create log formatters
+        detailed_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - [%(name)s] - %(message)s (%(filename)s:%(lineno)d)',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        simple_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - [%(name)s] - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
         
         # Create a log queue for async-safe logging
         self.log_queue = queue.Queue(-1)  # No limit on size
         
-        # Create handlers
-        file_handler = logging.FileHandler(self.log_file)
-        file_handler.setFormatter(formatter)
+        # Create INFO-only filter
+        class InfoFilter(logging.Filter):
+            def filter(self, record):
+                return record.levelno == logging.INFO
         
+        # Create WARNING-and-above filter
+        class WarningErrorFilter(logging.Filter):
+            def filter(self, record):
+                return record.levelno >= logging.WARNING
+        
+        # 1. Debug handler gets everything (DEBUG and above)
+        debug_handler = logging.FileHandler(self.debug_log_file)
+        debug_handler.setFormatter(detailed_formatter)
+        debug_handler.setLevel(logging.DEBUG)
+        
+        # 2. App handler gets INFO-only logs (filtered)
+        app_handler = logging.FileHandler(self.app_log_file)
+        app_handler.setFormatter(simple_formatter)
+        app_handler.setLevel(logging.INFO)
+        app_handler.addFilter(InfoFilter())
+        
+        # 3. Error handler gets WARNING and ERROR logs
+        error_handler = logging.FileHandler(self.error_log_file)
+        error_handler.setFormatter(simple_formatter)
+        error_handler.setLevel(logging.WARNING)
+        
+        # Console handler gets INFO and above
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
+        console_handler.setFormatter(simple_formatter)
+        console_handler.setLevel(logging.INFO)
         
         # Setup the queue listener (runs in a separate thread)
         self.queue_listener = QueueListener(
             self.log_queue, 
-            file_handler, 
+            app_handler,
+            debug_handler,
+            error_handler,
             console_handler,
             respect_handler_level=True
         )
@@ -74,7 +109,7 @@ class LogManager:
         
         # Configure the root logger
         root_logger.addHandler(queue_handler)
-        root_logger.setLevel(LOGGING_CONFIG["level"])
+        root_logger.setLevel(logging.DEBUG)  # Capture all logs at the root logger
         
         # Set specific module log levels
         logging.getLogger('src.cloud.api').setLevel(logging.DEBUG)

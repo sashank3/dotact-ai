@@ -1,42 +1,74 @@
 import os
 import yaml
 import logging
+import sys
+
+# Import app directory management from our exe module
+from src.exe.app_dirs import APP_DIRS, IS_FROZEN
 
 # Configure basic logger
 logger = logging.getLogger(__name__)
 
 # Base directory for the project
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BASE_DIR = APP_DIRS['app_root']
 
-# Define all config file paths
-CONFIG_FILES = {
-    "data": {
-        "gsi": os.path.join(BASE_DIR, "src/gsi/gsi_config.yaml"),
-    },
-    "ui": os.path.join(BASE_DIR, "src/ui/ui_config.yaml"),
-    "cloud": os.path.join(BASE_DIR, "src/cloud/cloud_config.yaml"),
-    "secrets": os.path.join(BASE_DIR, "src/cloud/secrets_config.yaml")
-}
+# Define all config file paths, with fallbacks for executable context
+def get_config_files():
+    if IS_FROZEN:
+        # In executable context, look first in the config directory, then fall back to bundled files
+        return {
+            "data": {
+                "gsi": os.path.join(APP_DIRS['config_dir'], "gsi_config.yaml"),
+            },
+            "ui": os.path.join(APP_DIRS['config_dir'], "ui_config.yaml"),
+            "cloud": os.path.join(APP_DIRS['config_dir'], "cloud_config.yaml"),
+            "secrets": os.path.join(APP_DIRS['config_dir'], "secrets_config.yaml")
+        }
+    else:
+        # In development, use the original paths
+        return {
+            "data": {
+                "gsi": os.path.join(BASE_DIR, "src/gsi/gsi_config.yaml"),
+            },
+            "ui": os.path.join(BASE_DIR, "src/ui/ui_config.yaml"),
+            "cloud": os.path.join(BASE_DIR, "src/cloud/cloud_config.yaml"),
+            "secrets": os.path.join(BASE_DIR, "src/cloud/secrets_config.yaml")
+        }
+
+CONFIG_FILES = get_config_files()
 
 # Global logging configuration
 LOGGING_CONFIG = {
-    "logs_dir": os.path.join(BASE_DIR, "logs"),
+    "logs_dir": APP_DIRS['logs_dir'],
     "level": "INFO",
     "format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
 }
 
-
+# Modified load_yaml_config to try multiple locations for config files
 def load_yaml_config(file_path):
     """Loads a YAML configuration file and returns its content as a dictionary."""
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Configuration file not found: {file_path}")
-
-    try:
-        with open(file_path, "r") as file:
-            return yaml.safe_load(file) or {}  # Ensure an empty dict if the file is empty
-    except yaml.YAMLError as e:
-        raise RuntimeError(f"Error parsing YAML configuration: {e}")
-
+    paths_to_try = [file_path]
+    
+    # If we're in executable mode, also try the bundled resource path
+    if IS_FROZEN:
+        # Try to find a default config in the executable directory
+        filename = os.path.basename(file_path)
+        exe_dir = os.path.dirname(sys.executable)
+        bundled_path = os.path.join(exe_dir, "config", filename)
+        paths_to_try.append(bundled_path)
+    
+    # Try each path in order
+    for path in paths_to_try:
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as file:
+                    return yaml.safe_load(file) or {}
+            except yaml.YAMLError as e:
+                logger.warning(f"Error parsing YAML configuration at {path}: {e}")
+    
+    # If we get here, none of the paths worked
+    logger.warning(f"Configuration file not found at any of these locations: {paths_to_try}")
+    return {}  # Return empty dict as fallback
 
 def load_global_config():
     """Loads all configuration files and returns a unified configuration dictionary."""
@@ -189,3 +221,11 @@ except Exception as e:
     # Google OAuth defaults
     GOOGLE_CLIENT_ID = ""
     GOOGLE_CLIENT_SECRET = ""
+
+# Ensure these directories exist
+os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
+os.makedirs(os.path.dirname(AUTH_TOKEN_FILE), exist_ok=True)
+
+# Update data file paths to use APP_DIRS
+STATE_FILE_PATH = os.path.join(APP_DIRS['data_dir'], "game_state.json")
+AUTH_TOKEN_FILE = os.path.join(APP_DIRS['data_dir'], "auth_token.json")

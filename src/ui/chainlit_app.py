@@ -11,8 +11,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 # Import log_manager first to ensure proper logging configuration 
 from src.logger.log_manager import log_manager
 
-# Import global configuration
-from src.global_config import STATE_FILE_PATH
+# Import configuration
+from src.config import config
 
 # Force reconfigure logging for the Chainlit process
 log_manager.reconfigure()
@@ -31,7 +31,7 @@ from src.ui.chainlit_helpers import (
 logger = logging.getLogger(__name__)
 
 # Log the loaded configuration
-logger.info("Using global configuration from global_config.py")
+logger.info("Using configuration from config module")
 
 # Get the API URL
 PROCESS_QUERY_API_URL = configure_process_query_api()
@@ -229,4 +229,4 @@ async def on_message(message: cl.Message):
 if __name__ == "__main__":
     logger.info("Chainlit app module loaded directly by Chainlit CLI")
     logger.info(f"Using API URL: {PROCESS_QUERY_API_URL}")
-    logger.info(f"Using state file: {STATE_FILE_PATH}")
+    logger.info(f"Using state file: {config.state_file_path}")

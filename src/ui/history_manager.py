@@ -11,8 +11,8 @@ import sys
 # Ensure Python can find your "src" folder
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Import global configuration
-from src.global_config import STATE_FILE_PATH
+# Import configuration
+from src.config import config
 from src.logger.log_manager import log_manager
 
 # Configure logging
@@ -40,9 +40,10 @@ def save_chat_history(user_id: str, query: str, response: str, thinking_content:
         
         # Load game state at the time of the query
         game_state = {}
-        if os.path.exists(STATE_FILE_PATH) and os.path.getsize(STATE_FILE_PATH) > 0:
+        state_file_path = config.state_file_path
+        if os.path.exists(state_file_path) and os.path.getsize(state_file_path) > 0:
             try:
-                with open(STATE_FILE_PATH, "r") as f:
+                with open(state_file_path, "r") as f:
                     game_state = json.load(f)
             except json.JSONDecodeError as e:
                 logger.error(f"Error parsing game state file: {str(e)}")

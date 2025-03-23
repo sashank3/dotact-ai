@@ -9,12 +9,11 @@ import chainlit as cl
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Create serializer for secure cookie data (must match auth.py)
-SECRET_KEY = os.getenv("FASTAPI_SECRET_KEY", "default-secret-key")
-serializer = URLSafeSerializer(SECRET_KEY)
+# Import configuration
+from src.config import config
 
-# Import from global config
-from src.global_config import AUTH_TOKEN_FILE, AUTH_SESSION_MAX_AGE
+# Create serializer for secure cookie data (must match auth.py)
+serializer = URLSafeSerializer(config.fastapi_secret_key)
 
 def handle_authentication():
     """
@@ -29,16 +28,16 @@ def handle_authentication():
     
     # Read from the auth token file - our reliable method
     try:
-        if os.path.exists(AUTH_TOKEN_FILE):
-            with open(AUTH_TOKEN_FILE, 'r') as f:
+        if os.path.exists(config.auth_token_file):
+            with open(config.auth_token_file, 'r') as f:
                 token_data = json.load(f)
                 auth_token = token_data.get("token")
                 token_timestamp = token_data.get("timestamp", 0)
                 token_age = int(time.time()) - token_timestamp
                 
                 # Check if token is not too old (max 48 hours)
-                if token_age < AUTH_SESSION_MAX_AGE:
-                    logger.info(f"Found auth_token in {AUTH_TOKEN_FILE}. Token age: {token_age} seconds")
+                if token_age < config.auth_session_max_age:
+                    logger.info(f"Found auth_token in {config.auth_token_file}. Token age: {token_age} seconds")
                 else:
                     logger.warning(f"Auth token in file is too old ({token_age} seconds). Ignoring.")
                     auth_token = None

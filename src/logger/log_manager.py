@@ -6,7 +6,7 @@ import queue
 from datetime import datetime
 from functools import wraps
 from logging.handlers import QueueHandler, QueueListener
-from src.global_config import LOGGING_CONFIG
+from src.config import config
 
 class LogManager:
     _instance = None
@@ -21,18 +21,20 @@ class LogManager:
         if "SESSION_DIR" in os.environ:
             self.session_dir = os.environ["SESSION_DIR"]
             # Re-initialize file paths from existing session dir
-            self.log_file = os.path.join(self.session_dir, "app.log")
+            self.keenmind_log_file = os.path.join(self.session_dir, "keenmind.log")
+            self.error_log_file = os.path.join(self.session_dir, "error.log")
             self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
         else:
             # Only create new session dir if not already set
-            base_logs_dir = LOGGING_CONFIG["logs_dir"]
+            base_logs_dir = config.logging_config["logs_dir"]
             os.makedirs(base_logs_dir, exist_ok=True)
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.session_dir = os.path.join(base_logs_dir, f"session_{timestamp}")
             os.makedirs(self.session_dir, exist_ok=True)
             
-            self.log_file = os.path.join(self.session_dir, "app.log")
+            self.keenmind_log_file = os.path.join(self.session_dir, "keenmind.log")
+            self.error_log_file = os.path.join(self.session_dir, "error.log")
             self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
             
             os.environ["SESSION_DIR"] = self.session_dir  # Set for child processes
@@ -49,22 +51,32 @@ class LogManager:
             root_logger.removeHandler(handler)
 
         # Create log formatter
-        formatter = logging.Formatter(LOGGING_CONFIG["format"])
+        formatter = logging.Formatter(config.logging_config["format"])
         
         # Create a log queue for async-safe logging
         self.log_queue = queue.Queue(-1)  # No limit on size
         
         # Create handlers
-        file_handler = logging.FileHandler(self.log_file)
-        file_handler.setFormatter(formatter)
+        # 1. Main log file handler (keenmind.log) - logs everything
+        main_file_handler = logging.FileHandler(self.keenmind_log_file)
+        main_file_handler.setFormatter(formatter)
+        main_file_handler.setLevel(config.logging_config["level"])
         
+        # 2. Error log file handler (error.log) - logs warnings and errors only
+        error_file_handler = logging.FileHandler(self.error_log_file)
+        error_file_handler.setFormatter(formatter)
+        error_file_handler.setLevel(logging.WARNING)  # WARNING and higher (ERROR, CRITICAL)
+        
+        # Console handler
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
+        console_handler.setLevel(config.logging_config["level"])
         
         # Setup the queue listener (runs in a separate thread)
         self.queue_listener = QueueListener(
             self.log_queue, 
-            file_handler, 
+            main_file_handler,
+            error_file_handler,
             console_handler,
             respect_handler_level=True
         )
@@ -74,7 +86,7 @@ class LogManager:
         
         # Configure the root logger
         root_logger.addHandler(queue_handler)
-        root_logger.setLevel(LOGGING_CONFIG["level"])
+        root_logger.setLevel(config.logging_config["level"])
         
         # Set specific module log levels
         logging.getLogger('src.cloud.api').setLevel(logging.DEBUG)

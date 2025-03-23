@@ -22,38 +22,20 @@ import threading
 # Ensure Python can find your "src" folder
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Import global configuration
-from src.global_config import (
-    CHAINLIT_APP_PATH, 
-    CHAINLIT_PORT, 
-    AUTH_PORT, 
-    AUTH_REDIRECT_URI, 
-    AUTH_SESSION_MAX_AGE,
-    AUTH_TOKEN_FILE,
-)
+# Import configuration
+from src.config import config
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Log the loaded configuration
-logger.info(f"Using Chainlit app path: {CHAINLIT_APP_PATH}")
-logger.info(f"Using Chainlit port: {CHAINLIT_PORT}")
-logger.info(f"Using Auth port: {AUTH_PORT}")
-logger.info(f"Using Auth redirect URI: {AUTH_REDIRECT_URI}")
-
-# Constants
-SECRET_KEY = os.getenv("FASTAPI_SECRET_KEY", "default-secret-key")
-MAX_AGE = AUTH_SESSION_MAX_AGE
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-REDIRECT_URI = AUTH_REDIRECT_URI
-
-# Cognito configuration
-COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID")
-COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
+logger.info(f"Using Chainlit app path: {config.chainlit_app_path}")
+logger.info(f"Using Chainlit port: {config.chainlit_port}")
+logger.info(f"Using Auth port: {config.auth_port}")
+logger.info(f"Using Auth redirect URI: {config.auth_redirect_uri}")
 
 # Create serializer for secure cookie data
-serializer = URLSafeSerializer(SECRET_KEY)
+serializer = URLSafeSerializer(config.fastapi_secret_key)
 
 # Create FastAPI app
 auth_app = FastAPI(title="Keenmind Authentication")
@@ -64,9 +46,10 @@ chainlit_process = None
 
 # Initialize Cognito client if credentials are available
 cognito_client = None
-if COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID:
+if config.cognito_user_pool_id and config.cognito_client_id:
     try:
-        cognito_client = boto3.client('cognito-idp', region_name=os.getenv("AWS_REGION", "us-east-2"))
+        # Directly use the region from config properties
+        cognito_client = boto3.client('cognito-idp', region_name=config.aws_region)
         logger.info("Cognito client initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize Cognito client: {str(e)}")
@@ -79,7 +62,7 @@ async def home(request: Request):
         cookie_value = request.cookies.get("session-data", "")
         logger.debug(f"Cookie value: {cookie_value}")
         
-        session_data = serializer.loads(cookie_value, max_age=MAX_AGE)
+        session_data = serializer.loads(cookie_value, max_age=config.auth_session_max_age)
         logger.info(f"Valid session found for {session_data.get('email')}. Redirecting to app")
         return RedirectResponse(url="/app")
     except (BadSignature, SignatureExpired) as e:
@@ -89,7 +72,7 @@ async def home(request: Request):
 @auth_app.get("/login/google")
 async def login_google(clear_cookies: bool = False, response: Response = None):
     """Initiate Google OAuth login flow."""
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+    if not config.google_client_id or not config.google_client_secret:
         logger.error("Google OAuth credentials not configured")
         raise HTTPException(status_code=500, detail="Authentication not configured")
     
@@ -102,8 +85,8 @@ async def login_google(clear_cookies: bool = False, response: Response = None):
     # Google OAuth authorization URL
     auth_url = "https://accounts.google.com/o/oauth2/auth"
     params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": REDIRECT_URI,
+        "client_id": config.google_client_id,
+        "redirect_uri": config.auth_redirect_uri,
         "response_type": "code",
         "scope": "email profile",
         "access_type": "offline",
@@ -123,10 +106,10 @@ async def oauth_callback(code: str, request: Request, response: Response):
         # Exchange code for access token
         token_url = "https://oauth2.googleapis.com/token"
         token_data = {
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
+            "client_id": config.google_client_id,
+            "client_secret": config.google_client_secret,
             "code": code,
-            "redirect_uri": REDIRECT_URI,
+            "redirect_uri": config.auth_redirect_uri,
             "grant_type": "authorization_code"
         }
         
@@ -155,7 +138,7 @@ async def oauth_callback(code: str, request: Request, response: Response):
                 try:
                     # List users with filter by email
                     user_response = cognito_client.list_users(
-                        UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
+                        UserPoolId=config.cognito_user_pool_id,
                         Filter=f'email = "{user_email}"'
                     )
                     
@@ -166,7 +149,7 @@ async def oauth_callback(code: str, request: Request, response: Response):
                         # Create new user in Cognito
                         try:
                             create_response = cognito_client.admin_create_user(
-                                UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
+                                UserPoolId=config.cognito_user_pool_id,
                                 Username=user_email,
                                 UserAttributes=[
                                     {'Name': 'email', 'Value': user_email},
@@ -182,7 +165,7 @@ async def oauth_callback(code: str, request: Request, response: Response):
                             import secrets
                             temp_password = secrets.token_urlsafe(16)
                             cognito_client.admin_set_user_password(
-                                UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
+                                UserPoolId=config.cognito_user_pool_id,
                                 Username=cognito_user_id,
                                 Password=temp_password,
                                 Permanent=True
@@ -219,7 +202,7 @@ async def oauth_callback(code: str, request: Request, response: Response):
             key="session-data",
             value=cookie_value,
             httponly=True,
-            max_age=MAX_AGE,
+            max_age=config.auth_session_max_age,
             path="/",  # Important: set cookie for all paths
             secure=False,  # Set to True in production with HTTPS
             samesite="lax"  # Important for redirects
@@ -253,7 +236,7 @@ async def chainlit_redirect(request: Request):
         
         try:
             # Load session data
-            session_data = serializer.loads(cookie_value, max_age=MAX_AGE)
+            session_data = serializer.loads(cookie_value, max_age=config.auth_session_max_age)
             
             # Additional check for token expiration
             current_time = int(time.time())
@@ -277,7 +260,7 @@ async def chainlit_redirect(request: Request):
             # Write token to file for Chainlit to access
             try:
                 # Ensure directory exists
-                os.makedirs(os.path.dirname(AUTH_TOKEN_FILE), exist_ok=True)
+                os.makedirs(os.path.dirname(config.auth_token_file), exist_ok=True)
                 
                 # Create token data structure with user info for easier access
                 token_data = {
@@ -288,10 +271,10 @@ async def chainlit_redirect(request: Request):
                 }
                 
                 # Write to file
-                with open(AUTH_TOKEN_FILE, 'w') as f:
+                with open(config.auth_token_file, 'w') as f:
                     json.dump(token_data, f)
                 
-                logger.info(f"Wrote authentication token to {AUTH_TOKEN_FILE}")
+                logger.info(f"Wrote authentication token to {config.auth_token_file}")
             except Exception as e:
                 logger.error(f"Error writing token to file: {str(e)}")
             
@@ -302,7 +285,7 @@ async def chainlit_redirect(request: Request):
             # Method 1: Standard URL parameter with proper encoding
             from urllib.parse import urlencode
             params = {'auth_token': encoded_session}
-            chainlit_url = f"http://localhost:{CHAINLIT_PORT}?{urlencode(params)}"
+            chainlit_url = f"http://localhost:{config.chainlit_port}?{urlencode(params)}"
             
             # Method 2: Try setting a cookie that Chainlit might be able to access
             response = RedirectResponse(url=chainlit_url)
@@ -310,7 +293,7 @@ async def chainlit_redirect(request: Request):
                 key="chainlit-auth-token",
                 value=encoded_session,
                 httponly=False,  # Allow JavaScript access
-                max_age=MAX_AGE,
+                max_age=config.auth_session_max_age,
                 path="/",
                 secure=False,
                 samesite="lax"
@@ -379,9 +362,9 @@ def start_chainlit():
         is_chainlit_running = True
         return
         
-    command = f"chainlit run {CHAINLIT_APP_PATH} --port {CHAINLIT_PORT} --headless"
+    command = f"chainlit run {config.chainlit_app_path} --port {config.chainlit_port} --headless"
     
-    logger.info(f"Starting Chainlit server on port {CHAINLIT_PORT} with app {CHAINLIT_APP_PATH}")
+    logger.info(f"Starting Chainlit server on port {config.chainlit_port} with app {config.chainlit_app_path}")
     
     try:
         # Start chainlit in a subprocess
@@ -412,7 +395,7 @@ def start_chainlit():
 def run_auth_server(host="0.0.0.0", port=None):
     """Start the authentication server."""
     if port is None:
-        port = AUTH_PORT
+        port = config.auth_port
         
     logger.info(f"Starting authentication server on port {port}")
     
@@ -429,11 +412,11 @@ def run_auth_server(host="0.0.0.0", port=None):
     browser_thread.start()
     
     # Use uvicorn.Config and Server classes for thread-safe operation
-    config = uvicorn.Config(
+    config_uvicorn = uvicorn.Config(
         app=auth_app,
         host=host,
         port=port,
         log_level="info"
     )
-    server = uvicorn.Server(config)
+    server = uvicorn.Server(config_uvicorn)
     server.run() 

@@ -6,7 +6,7 @@ import asyncio
 import aiofiles
 from typing import Optional, Dict
 from threading import Lock
-from src.global_config import STATE_FILE_PATH
+from src.config import config
 
 
 # Configure logging
@@ -74,7 +74,7 @@ class StateManager:
     def __init__(self):
         """Initialize the state manager."""
         self.state = {}
-        self.state_file = STATE_FILE_PATH
+        self.state_file = config.state_file_path
         self.hero_extractor = HeroExtractor()
         self._lock = Lock()
         

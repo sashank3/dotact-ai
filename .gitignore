@@ -168,7 +168,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-/src/.chainlit
+config/secrets_config.yaml
 src/chat_history.json
 /data
 chainlit.md
@@ -179,4 +179,3 @@ chainlit.md
 infra/cdk.out/
 infra/node_modules/
 
-/images

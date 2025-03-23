@@ -15,8 +15,8 @@ import uvicorn
 # Ensure Python can find your "src" folder
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Import global configuration
-from src.global_config import GSI_CONFIG, GSI_HOST, GSI_PORT, STATE_FILE_PATH
+# Import configuration
+from src.config import config
 
 # Import state manager
 from src.gsi.state_manager import state_manager
@@ -25,7 +25,7 @@ from src.gsi.state_manager import state_manager
 logger = logging.getLogger(__name__)
 
 # Get the state file path from configuration
-STATE_FILE_PATH = GSI_CONFIG.get("state_file", "data/game_state.json")
+STATE_FILE_PATH = config.state_file_path
 logger.info(f"Using game state file: {STATE_FILE_PATH}")
 
 # Create FastAPI app
@@ -96,18 +96,18 @@ async def startup_event():
 
 def run_gsi_server(host=None, port=None):
     """Run the GSI server."""
-    # Use provided host/port or fall back to global config
+    # Use provided host/port or fall back to config
     if host is None:
-        host = GSI_HOST
+        host = config.gsi_host
     
     if port is None:
-        port = GSI_PORT
+        port = config.gsi_port
     
     # Log the configuration
     logger.info(f"Starting GSI server on {host}:{port}")
     
     # Use uvicorn.Config and Server classes for thread-safe operation
-    config = uvicorn.Config(
+    config_uvicorn = uvicorn.Config(
         app="src.gsi.server:gsi_app",
         host=host,
         port=port,
@@ -115,5 +115,5 @@ def run_gsi_server(host=None, port=None):
         log_level="info",
         access_log=False  # Disable access logs completely
     )
-    server = uvicorn.Server(config)
+    server = uvicorn.Server(config_uvicorn)
     server.run()

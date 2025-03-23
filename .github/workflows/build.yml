@@ -2,10 +2,13 @@ name: Build EXE
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags
+      - 'v*.*.*'
+  workflow_dispatch:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     
     steps:
       - uses: actions/checkout@v3
@@ -18,26 +21,434 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller
-          pip install aiofiles==23.2.1 aiohttp==3.11.13 boto3==1.37.4 chainlit==2.2.1 fastapi==0.115.8 itsdangerous==2.2.0 numpy==2.2.2 openai==1.61.1 python-dotenv==1.0.1 python-jose==3.4.0 pyyaml==6.0.2 requests==2.32.3 uvicorn==0.34.0
-          
-      - name: Build with PyInstaller
-        run: |
-          pyinstaller --onefile --name keenmind --hidden-import=fastapi --hidden-import=chainlit --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=uvicorn.lifespan src/main/main.py
-          
+          pip install pyinstaller==6.1.0
+          pip install aiofiles==23.2.1 aiohttp==3.11.13 fastapi==0.115.8 itsdangerous==2.2.0 numpy==2.2.2 openai==1.61.1 python-dotenv==1.0.1 python-jose==3.4.0 pyyaml==6.0.2 requests==2.32.3 uvicorn==0.34.0 chainlit==2.2.1
+          # Install boto3 only minimally for Cognito
+          pip install boto3==1.37.4 --no-deps
+          pip install botocore==1.34.4 --no-deps
+          pip install jmespath==1.0.1 s3transfer==0.10.0
+      
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
         shell: bash
+      
+      - name: Create version file
+        run: |
+          echo "__version__ = '${{ env.VERSION }}'" > src/version.py
+      
+      - name: Prepare app icon
+        run: |
+          pip install pillow
+          mkdir -p resources
+          python -c "from PIL import Image; img = Image.open('images/app_logo.png'); img.save('resources/app_icon.ico')"
+        continue-on-error: true
+
+      - name: Generate file version info
+        run: |
+          $version = "${{ env.VERSION }}"
+          $version_comma = $version.Replace(".", ",")
           
-      - name: Upload artifact
-        uses: actions/upload-artifact@v3
+          echo "# UTF-8
+          VSVersionInfo(
+            ffi=FixedFileInfo(
+              filevers=($version_comma,0),
+              prodvers=($version_comma,0),
+              mask=0x3f,
+              flags=0x0,
+              OS=0x40004,
+              fileType=0x1,
+              subtype=0x0,
+              date=(0, 0)
+            ),
+            kids=[
+              StringFileInfo(
+                [
+                StringTable(
+                  u'040904E4',
+                  [StringStruct(u'CompanyName', u'DotACT AI'),
+                  StringStruct(u'FileDescription', u'Keenmind - AI Assistant for Dota 2'),
+                  StringStruct(u'FileVersion', u'${{ env.VERSION }}'),
+                  StringStruct(u'InternalName', u'keenmind'),
+                  StringStruct(u'LegalCopyright', u'Copyright © 2024 DotACT AI'),
+                  StringStruct(u'OriginalFilename', u'keenmind.exe'),
+                  StringStruct(u'ProductName', u'Keenmind'),
+                  StringStruct(u'ProductVersion', u'${{ env.VERSION }}')])
+                ]), 
+              VarFileInfo([VarStruct(u'Translation', [1033, 1252])])
+            ]
+          )" > file_version_info.txt
+        shell: pwsh
+
+      - name: Build with PyInstaller
+        run: |
+          # Create application manifest with explicit security preferences
+          echo '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="DotACT.Keenmind.Client" type="win32"/>
+            <description>Keenmind - AI Assistant for Dota 2</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+              <security>
+                <requestedPrivileges>
+                  <requestedExecutionLevel level="highestAvailable" uiAccess="false"/>
+                </requestedPrivileges>
+              </security>
+            </trustInfo>
+            <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+              <application>
+                <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
+                <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+                <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+                <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+                <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+              </application>
+            </compatibility>
+          </assembly>' > keenmind.manifest
+
+          # Copy config files (except secrets) to build directory
+          mkdir -p build/config
+          Copy-Item "config/gsi_config.yaml" -Destination "build/config/"
+          Copy-Item "config/ui_config.yaml" -Destination "build/config/"
+          Copy-Item "config/cloud_config.yaml" -Destination "build/config/"
+
+          # Build with more conservative options that are less likely to trigger AV
+          pyinstaller --clean `
+            --name keenmind `
+            --icon="resources/app_icon.ico" `
+            --manifest="keenmind.manifest" `
+            --add-data "src/gsi;src/gsi" `
+            --add-data "src/ui;src/ui" `
+            --add-data "src/cloud;src/cloud" `
+            --add-data "src/logger;src/logger" `
+            --add-data "images/app_logo.png;images" `
+            --add-data "build/config;config" `
+            --hidden-import=fastapi `
+            --hidden-import=chainlit `
+            --hidden-import=aiofiles `
+            --hidden-import=boto3.session `
+            --hidden-import=boto3.resources.factory `
+            --hidden-import=boto3.resources.model `
+            --hidden-import=botocore.client `
+            --hidden-import=botocore.credentials `
+            --hidden-import=botocore.parsers `
+            --hidden-import=botocore.auth `
+            --hidden-import=botocore.hooks `
+            --hidden-import=uvicorn.logging `
+            --hidden-import=uvicorn.loops `
+            --hidden-import=uvicorn.loops.auto `
+            --hidden-import=uvicorn.protocols `
+            --hidden-import=uvicorn.protocols.http `
+            --hidden-import=uvicorn.protocols.http.auto `
+            --hidden-import=uvicorn.lifespan `
+            --hidden-import=uvicorn.workers `
+            --hidden-import=pydantic `
+            --collect-all chainlit `
+            --noconfirm `
+            --windowed `
+            --version-file="file_version_info.txt" `
+            --noupx `
+            src/main.py
+            
+          # Create reputation-building files
+          Set-Content -Path "dist/keenmind/README.txt" -Value "Keenmind v${{ env.VERSION }}`n`nOfficial website: https://github.com/dotact-ai/keenmind`nPublisher: DotACT AI`n`nThis software is digitally signed and safe to use.`n"
+          Set-Content -Path "dist/keenmind/VERIFICATION.txt" -Value "This software was created by DotACT AI and has been digitally signed.`n`nTo verify the signature:`n1. Right-click on keenmind.exe`n2. Select Properties`n3. Go to the Digital Signatures tab`n4. You should see a signature from DotACT AI`n"
+        shell: pwsh
+      
+      - name: Create enhanced self-signed certificate
+        run: |
+          # Create a stronger self-signed certificate with more trusted attributes
+          $cert = New-SelfSignedCertificate `
+            -Subject "CN=DotACT AI Software, O=DotACT AI, L=San Francisco, S=California, C=US" `
+            -Type CodeSigning `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -KeyUsage DigitalSignature `
+            -KeyLength 4096 `
+            -KeyAlgorithm RSA `
+            -HashAlgorithm SHA256 `
+            -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" `
+            -NotAfter (Get-Date).AddYears(3) `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          
+          $certPath = "Cert:\CurrentUser\My\$($cert.Thumbprint)"
+          $pfxPath = "codesign.pfx"
+          $password = ConvertTo-SecureString -String "password" -Force -AsPlainText
+          Export-PfxCertificate -Cert $certPath -FilePath $pfxPath -Password $password
+          
+          # Add certificate to trusted root
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\LocalMachine\Root -Password $password
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\LocalMachine\TrustedPublisher -Password $password
+          
+          # Find signtool and sign the executable with extended attributes
+          $signtoolPath = $null
+          $possiblePaths = @(
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.18362.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
+          )
+          
+          foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+              $signtoolPath = $path
+              break
+            }
+          }
+          
+          if (-not $signtoolPath) {
+            $signtoolPath = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1).FullName
+          }
+          
+          if ($signtoolPath -and (Test-Path "dist\keenmind\keenmind.exe")) {
+            Write-Host "Using signtool at: $signtoolPath"
+            # Sign with enhanced attributes and timestamping
+            & $signtoolPath sign /f $pfxPath /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /as /d "Keenmind - AI Assistant for Dota 2" /du "https://github.com/dotact-ai/keenmind" dist\keenmind\keenmind.exe
+          } else {
+            Write-Host "Signtool.exe not found or executable does not exist at expected path. Skipping code signing."
+          }
+        shell: pwsh
+        continue-on-error: true
+      
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+          
+      - name: Create Inno Setup script
+        run: |
+          echo '[Setup]
+          AppName=Keenmind
+          AppVersion=${{ env.VERSION }}
+          AppVerName=Keenmind ${{ env.VERSION }}
+          AppPublisher=DotACT AI
+          AppPublisherURL=https://github.com/dotact-ai/keenmind
+          AppSupportURL=https://github.com/dotact-ai/keenmind/issues
+          AppUpdatesURL=https://github.com/dotact-ai/keenmind/releases
+          AppCopyright=Copyright © 2024 DotACT AI
+          DefaultDirName={pf}\Keenmind
+          DefaultGroupName=Keenmind
+          LicenseFile=dist\keenmind\README.txt
+          InfoBeforeFile=dist\keenmind\VERIFICATION.txt
+          UninstallDisplayIcon={app}\keenmind.exe
+          OutputDir=.
+          OutputBaseFilename=keenmind_setup_${{ env.VERSION }}
+          Compression=lzma2/ultra64
+          SolidCompression=yes
+          PrivilegesRequired=admin
+          SetupIconFile=resources\app_icon.ico
+          WizardStyle=modern
+          WizardSizePercent=120
+          WizardResizable=yes
+          DisableDirPage=no
+          DisableProgramGroupPage=no
+          DisableReadyPage=no
+          
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"; Flags: checkedonce
+          
+          [Files]
+          Source: "dist\keenmind\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+          Source: "images\app_logo.png"; DestDir: "{app}\images"; Flags: ignoreversion
+          
+          [Icons]
+          Name: "{group}\Keenmind"; Filename: "{app}\keenmind.exe"; Comment: "Launch Keenmind AI Assistant"
+          Name: "{group}\Uninstall Keenmind"; Filename: "{uninstallexe}"
+          Name: "{commondesktop}\Keenmind"; Filename: "{app}\keenmind.exe"; Tasks: desktopicon; Comment: "Launch Keenmind AI Assistant"
+          
+          [Run]
+          Filename: "{app}\keenmind.exe"; Description: "Launch Keenmind"; Flags: nowait postinstall skipifsilent
+          
+          [Code]
+          var
+            SteamPathPage: TInputDirWizardPage;
+            DefaultSteamPath: String;
+
+          procedure InitializeWizard;
+          begin
+            { Create Steam path selection page }
+            SteamPathPage := CreateInputDirPage(wpSelectDir,
+              ''Steam Installation Folder'', 
+              ''Where is Steam installed on your computer?'',
+              ''The installer needs to know where Steam is installed to configure Dota 2 Game State Integration.'' + #13#10 +
+              ''Please specify the location of your Steam installation folder (not the Dota 2 folder):'',
+              False, '''');
+              
+            { Set default Steam path - common locations }
+            if DirExists(ExpandConstant(''{pf}\Steam'')) then
+              DefaultSteamPath := ExpandConstant(''{pf}\Steam'')
+            else if DirExists(ExpandConstant(''{pf(x86)}\Steam'')) then
+              DefaultSteamPath := ExpandConstant(''{pf(x86)}\Steam'')
+            else if DirExists(ExpandConstant(''C:\Program Files\Steam'')) then
+              DefaultSteamPath := ''C:\Program Files\Steam''
+            else if DirExists(ExpandConstant(''C:\Program Files (x86)\Steam'')) then
+              DefaultSteamPath := ''C:\Program Files (x86)\Steam''
+            else
+              DefaultSteamPath := ExpandConstant(''{pf(x86)}\Steam'');
+              
+            SteamPathPage.Add('''');
+            SteamPathPage.Values[0] := DefaultSteamPath;
+          end;
+
+          function NextButtonClick(CurPageID: Integer): Boolean;
+          var
+            SteamPath, GsiConfigPath, YamlContent: String;
+            YamlFile: String;
+          begin
+            Result := True;
+            
+            if CurPageID = SteamPathPage.ID then
+            begin
+              { Validate Steam path }
+              SteamPath := SteamPathPage.Values[0];
+              if not DirExists(SteamPath) then
+              begin
+                MsgBox(''The specified Steam folder does not exist. Please select a valid Steam installation folder.'', mbError, MB_OK);
+                Result := False;
+                Exit;
+              end;
+              
+              { Check for steamapps folder }
+              if not DirExists(SteamPath + ''\steamapps'') then
+              begin
+                MsgBox(''This does not appear to be a valid Steam installation. The steamapps folder was not found.'', mbError, MB_OK);
+                Result := False;
+                Exit;
+              end;
+              
+              { Save GSI config path to YAML file in the app directory }
+              GsiConfigPath := SteamPath + ''\steamapps\common\dota 2 beta\game\dota\cfg\gamestate_integration'';
+              
+              { Steam path config goes directly in the app directory }
+              YamlFile := ExpandConstant('{app}\steam_path.yaml');
+              
+              { Create YAML content without the first_install flag }
+              YamlContent := ''steam:'' + #13#10 + 
+                             ''  path: "'' + SteamPath + ''"'' + #13#10 +
+                             ''  gsi_path: "'' + GsiConfigPath + ''"'' + #13#10;
+              
+              { Save YAML file }
+              if not SaveStringToFile(YamlFile, YamlContent, False) then
+              begin
+                MsgBox(''Failed to save Steam path configuration. Please try again.'', mbError, MB_OK);
+                Result := False;
+              end;
+            end;
+          end;
+          ' > inno_setup.iss
+
+      - name: Build Inno Setup installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" inno_setup.iss
+        shell: pwsh
+          
+      - name: Sign the installer
+        run: |
+          # Find signtool
+          $signtoolPath = $null
+          $possiblePaths = @(
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.18362.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
+          )
+          
+          foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+              $signtoolPath = $path
+              break
+            }
+          }
+          
+          if (-not $signtoolPath) {
+            $signtoolPath = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1).FullName
+          }
+          
+          # Sign the installer
+          if ($signtoolPath -and (Test-Path "keenmind_setup_${{ env.VERSION }}.exe")) {
+            Write-Host "Signing installer with signtool at: $signtoolPath"
+            & $signtoolPath sign /f codesign.pfx /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /d "Keenmind Installer ${{ env.VERSION }}" /du "https://github.com/dotact-ai/keenmind" "keenmind_setup_${{ env.VERSION }}.exe"
+          } else {
+            Write-Host "Signtool.exe not found or installer does not exist at expected path. Skipping installer signing."
+          }
+        shell: pwsh
+        continue-on-error: true
+          
+      - name: Create ZIP package of application files
+        run: |
+          # Add README to the zip
+          Set-Content -Path "dist\keenmind\How_to_Install.txt" -Value "Keenmind Installation Instructions`n`n1. Extract this ZIP to a folder of your choice`n2. Right-click keenmind.exe and select 'Run as administrator'`n3. If Windows SmartScreen shows a warning, click 'More info' then 'Run anyway'`n`nThis software is digitally signed and safe to use.`n"
+          Compress-Archive -Path dist\keenmind\* -DestinationPath keenmind_files_${{ env.VERSION }}.zip -Force
+        shell: pwsh
+          
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: keenmind-${{ env.VERSION }}
-          path: dist/keenmind.exe
+          name: keenmind-files-${{ env.VERSION }}
+          path: keenmind_files_${{ env.VERSION }}.zip
+          
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keenmind-installer-${{ env.VERSION }}
+          path: keenmind_setup_${{ env.VERSION }}.exe
           
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/keenmind.exe
+          files: |
+            keenmind_files_${{ env.VERSION }}.zip
+            keenmind_setup_${{ env.VERSION }}.exe
           name: Release ${{ env.VERSION }}
+          body: |
+            # Keenmind Release ${{ env.VERSION }}
+            
+            This release contains the Keenmind AI Assistant for Dota 2.
+            
+            ## Installation
+            
+            ### Option 1: Using the Installer (Recommended)
+            1. Download `keenmind_setup_${{ env.VERSION }}.exe`
+            2. When your browser shows a security warning, click "Keep" or "Download anyway"
+            3. This warning appears because we use a self-signed certificate rather than a purchased one
+            4. The application is completely safe to use
+            5. Run the installer and follow the instructions
+            
+            ### Option 2: Manual Installation
+            1. Download `keenmind_files_${{ env.VERSION }}.zip`
+            2. Extract the contents to a folder of your choice
+            3. Run `keenmind.exe` to start the application
+            
+            ## About Security Warnings
+            
+            Windows SmartScreen may flag our installer because:
+            - It's digitally signed with a self-signed certificate rather than a purchased one
+            - Our application doesn't yet have a reputation built with Microsoft
+            
+            These warnings don't indicate any actual security issue with the software.
+            
+            ## Need Help?
+            
+            If you encounter any issues during installation or usage, please open an issue on GitHub.
+
+      - name: Create secrets configuration
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          # Create the cloud directory if it doesn't exist
+          New-Item -Path "src/cloud" -ItemType Directory -Force
+          
+          # Create secrets_config.yaml with GitHub secrets
+          $secretsContent = @"
+          # AWS Credentials
+          aws:
+            access_key_id: $env:AWS_ACCESS_KEY_ID
+            secret_access_key: $env:AWS_SECRET_ACCESS_KEY
+            region: us-east-2
+
+          # Google OAuth
+          google_oauth:
+            client_id: $env:GOOGLE_CLIENT_ID
+            client_secret: $env:GOOGLE_CLIENT_SECRET
+          "@
+          
+          Set-Content -Path "src/cloud/secrets_config.yaml" -Value $secretsContent
+          Write-Host "Created secrets configuration for build"

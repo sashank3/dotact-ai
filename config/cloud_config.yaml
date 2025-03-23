@@ -1,0 +1,17 @@
+# Lambda Functions
+lambda:
+  process_query_arn: arn:aws:lambda:us-east-2:474668394137:function:KeenMindLambdaStack-ProcessQueryFunction9435274E-8odXixqQEeRH
+  check_access_arn: arn:aws:lambda:us-east-2:474668394137:function:KeenMindLambdaStack-CheckAccessFunction7E02B665-wKq4DC4rrXXl
+
+# AWS Cognito
+cognito:
+  user_pool_id: us-east-2_K5ewohoIp
+  client_id: 4bipc7u6ss4nfr1ncu38uaih0o
+  domain: keenmind-app-auth.auth.us-east-2.amazoncognito.com
+
+# API Gateway
+api_gateway:
+  id: g7ziap1vmj
+  root_resource_id: qpr7csdyrf
+  process_query_url: https://g7ziap1vmj.execute-api.us-east-2.amazonaws.com/prod/process-query
+  base_url: https://g7ziap1vmj.execute-api.us-east-2.amazonaws.com/prod

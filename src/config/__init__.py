@@ -122,7 +122,21 @@ class ConfigManager:
     
     @property
     def auth_token_file(self):
-        return self.auth_config.get("token_file", "data/auth_token.json")
+        # Get the configured path from the config
+        config_path = self.auth_config.get("token_file", "data/auth_token.json")
+        
+        # If we're in a frozen environment (production), we need to use the user data path
+        from src.bootstrap import is_frozen
+        from src.utils.paths import get_user_data_path
+        
+        if is_frozen():
+            # For a frozen app, return an absolute path in the user data directory
+            # Just take the filename part from the config path
+            filename = os.path.basename(config_path)
+            return os.path.join(get_user_data_path(), filename)
+        else:
+            # In development, use the path from the config as is
+            return config_path
     
     @property
     def fastapi_secret_key(self):
@@ -139,7 +153,21 @@ class ConfigManager:
     
     @property
     def state_file_path(self):
-        return self.gsi_config.get("state_file", "data/game_state.json")
+        # Get the configured path from the YAML config
+        config_path = self.gsi_config.get("state_file", "data/game_state.json")
+        
+        # If we're in a frozen environment (production), we need to use the user data path
+        from src.bootstrap import is_frozen
+        from src.utils.paths import get_user_data_path
+        
+        if is_frozen():
+            # For a frozen app, return an absolute path in the user data directory
+            # Just take the filename part from the config path
+            filename = os.path.basename(config_path)
+            return os.path.join(get_user_data_path(), filename)
+        else:
+            # In development, use the path from the config as is
+            return config_path
     
     @property
     def gsi_server_config(self):

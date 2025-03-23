@@ -5,8 +5,14 @@ import logging
 import traceback
 import re
 
-# Ensure Python can find your "src" folder
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# Simple, reliable path handling
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable
+    sys.path.insert(0, os.path.dirname(sys.executable))
+else:
+    # Running in development environment
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, root_dir)
 
 # Import log_manager first to ensure proper logging configuration 
 from src.logger.log_manager import log_manager

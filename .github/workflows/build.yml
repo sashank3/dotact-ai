@@ -116,10 +116,7 @@ jobs:
             --name keenmind `
             --icon="resources/app_icon.ico" `
             --manifest="keenmind.manifest" `
-            --add-data "src/gsi;src/gsi" `
-            --add-data "src/ui;src/ui" `
-            --add-data "src/cloud;src/cloud" `
-            --add-data "src/logger;src/logger" `
+            --add-data "src;src" `
             --add-data "images/app_logo.png;images" `
             --add-data "build/config;config" `
             --hidden-import=fastapi `
@@ -147,11 +144,63 @@ jobs:
             --windowed `
             --version-file="file_version_info.txt" `
             --noupx `
-            src/main.py
+            main.py
             
           # Create reputation-building files
-          Set-Content -Path "dist/keenmind/README.txt" -Value "Keenmind v${{ env.VERSION }}`n`nOfficial website: https://github.com/dotact-ai/keenmind`nPublisher: DotACT AI`n`nThis software is digitally signed and safe to use.`n"
-          Set-Content -Path "dist/keenmind/VERIFICATION.txt" -Value "This software was created by DotACT AI and has been digitally signed.`n`nTo verify the signature:`n1. Right-click on keenmind.exe`n2. Select Properties`n3. Go to the Digital Signatures tab`n4. You should see a signature from DotACT AI`n"
+          Set-Content -Path "dist/keenmind/README.txt" -Value "Keenmind v${{ env.VERSION }}`n`nOfficial website: https://github.com/dotact-ai/keenmind`nPublisher: DotACT AI`n`nThis software is safe to use.`n"
+          
+          # Create license agreement
+          $licenseContent = @'
+          END USER LICENSE AGREEMENT
+
+          IMPORTANT: PLEASE READ THIS END USER LICENSE AGREEMENT CAREFULLY BEFORE INSTALLING OR USING KEENMIND SOFTWARE.
+
+          1. ACCEPTANCE OF TERMS
+          By installing, accessing, or using the Keenmind software ("Software"), you agree to be bound by the terms of this End User License Agreement ("Agreement"). If you do not agree to these terms, do not install, access, or use the Software.
+
+          2. LICENSE GRANT
+          Subject to the terms of this Agreement, DotACT AI grants you a limited, non-exclusive, non-transferable license to use the Software for your personal or internal business purposes.
+
+          3. RESTRICTIONS
+          You may not:
+          (a) Modify, adapt, translate, reverse engineer, decompile, disassemble, or create derivative works based on the Software;
+          (b) Rent, lease, loan, sell, distribute, or sublicense the Software;
+          (c) Remove or alter any proprietary notices or labels on the Software;
+          (d) Use the Software for any illegal purpose or in any manner that violates applicable laws or regulations.
+
+          4. OWNERSHIP
+          The Software is owned and copyrighted by DotACT AI. Your license confers no title or ownership in the Software and is not a sale of any rights in the Software.
+
+          5. DISCLAIMER OF WARRANTIES
+          THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. DOTACT AI MAKES NO WARRANTY THAT THE SOFTWARE WILL MEET YOUR REQUIREMENTS OR THAT THE OPERATION OF THE SOFTWARE WILL BE UNINTERRUPTED OR ERROR-FREE.
+
+          6. LIMITATION OF LIABILITY
+          TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL DOTACT AI BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, CONSEQUENTIAL, OR PUNITIVE DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF PROFITS, BUSINESS INTERRUPTION, LOSS OF INFORMATION, OR ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR INABILITY TO USE THE SOFTWARE, EVEN IF DOTACT AI HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. IN ANY CASE, DOTACT AI'S ENTIRE LIABILITY UNDER ANY PROVISION OF THIS AGREEMENT SHALL BE LIMITED TO THE AMOUNT ACTUALLY PAID BY YOU FOR THE SOFTWARE.
+
+          7. INDEMNIFICATION
+          You agree to indemnify, defend, and hold harmless DotACT AI, its officers, directors, employees, agents, and suppliers from and against all claims, losses, expenses, damages, and costs, including reasonable attorneys' fees, resulting from any violation of this Agreement by you or any activity related to your account (including negligent or wrongful conduct) by you or any other person accessing the Software using your account.
+
+          8. NO THIRD-PARTY BENEFICIARIES
+          This Agreement does not confer any third-party beneficiary rights.
+
+          9. WAIVER OF CLASS ACTIONS
+          ANY DISPUTE RESOLUTION PROCEEDINGS, WHETHER IN ARBITRATION OR COURT, WILL BE CONDUCTED ONLY ON AN INDIVIDUAL BASIS AND NOT IN A CLASS OR REPRESENTATIVE ACTION OR AS A NAMED OR UNNAMED MEMBER IN A CLASS, CONSOLIDATED, REPRESENTATIVE OR PRIVATE ATTORNEY GENERAL LEGAL ACTION.
+
+          10. GOVERNING LAW
+          This Agreement shall be governed by and construed in accordance with the laws of the State of California without giving effect to any principles of conflicts of law. Any legal action or proceeding relating to this Agreement shall be brought exclusively in the state or federal courts located in San Francisco, California.
+
+          11. AMENDMENTS
+          DotACT AI reserves the right, at its sole discretion, to modify or replace this Agreement at any time.
+
+          12. SURVIVAL
+          Sections 3, 4, 5, 6, 7, 9, 10, and 12 shall survive termination of this Agreement.
+
+          13. SECURITY AND DATA COLLECTION
+          The Software does not collect any personal data beyond what is strictly necessary for authentication and functionality. All data processing is transparent and only with user consent.
+
+          BY INSTALLING OR USING THE SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT, UNDERSTAND IT, AND AGREE TO BE BOUND BY ITS TERMS AND CONDITIONS.
+          '@
+          Set-Content -Path "dist/keenmind/LICENSE.txt" -Value $licenseContent
         shell: pwsh
       
       - name: Create enhanced self-signed certificate
@@ -224,8 +273,8 @@ jobs:
           AppCopyright=Copyright © 2024 DotACT AI
           DefaultDirName={pf}\Keenmind
           DefaultGroupName=Keenmind
-          LicenseFile=dist\keenmind\README.txt
-          InfoBeforeFile=dist\keenmind\VERIFICATION.txt
+          LicenseFile=dist\keenmind\LICENSE.txt
+          InfoBeforeFile=dist\keenmind\README.txt
           UninstallDisplayIcon={app}\keenmind.exe
           OutputDir=.
           OutputBaseFilename=keenmind_setup_${{ env.VERSION }}
@@ -316,9 +365,9 @@ jobs:
               GsiConfigPath := SteamPath + ''\steamapps\common\dota 2 beta\game\dota\cfg\gamestate_integration'';
               
               { Steam path config goes directly in the app directory }
-              YamlFile := ExpandConstant('{app}\steam_path.yaml');
+              YamlFile := ExpandConstant(''{app}\steam_path.yaml'');
               
-              { Create YAML content without the first_install flag }
+              { Create YAML content }
               YamlContent := ''steam:'' + #13#10 + 
                              ''  path: "'' + SteamPath + ''"'' + #13#10 +
                              ''  gsi_path: "'' + GsiConfigPath + ''"'' + #13#10;
@@ -372,7 +421,7 @@ jobs:
       - name: Create ZIP package of application files
         run: |
           # Add README to the zip
-          Set-Content -Path "dist\keenmind\How_to_Install.txt" -Value "Keenmind Installation Instructions`n`n1. Extract this ZIP to a folder of your choice`n2. Right-click keenmind.exe and select 'Run as administrator'`n3. If Windows SmartScreen shows a warning, click 'More info' then 'Run anyway'`n`nThis software is digitally signed and safe to use.`n"
+          Set-Content -Path "dist\keenmind\How_to_Install.txt" -Value "Keenmind Installation Instructions`n`n1. Extract this ZIP to a folder of your choice`n2. Right-click keenmind.exe and select 'Run as administrator'`n3. If Windows SmartScreen shows a warning, click 'More info' then 'Run anyway'`n`nThis software is safe to use.`n"
           Compress-Archive -Path dist\keenmind\* -DestinationPath keenmind_files_${{ env.VERSION }}.zip -Force
         shell: pwsh
           
@@ -405,9 +454,7 @@ jobs:
             ### Option 1: Using the Installer (Recommended)
             1. Download `keenmind_setup_${{ env.VERSION }}.exe`
             2. When your browser shows a security warning, click "Keep" or "Download anyway"
-            3. This warning appears because we use a self-signed certificate rather than a purchased one
-            4. The application is completely safe to use
-            5. Run the installer and follow the instructions
+            3. Run the installer and follow the instructions
             
             ### Option 2: Manual Installation
             1. Download `keenmind_files_${{ env.VERSION }}.zip`
@@ -416,11 +463,7 @@ jobs:
             
             ## About Security Warnings
             
-            Windows SmartScreen may flag our installer because:
-            - It's digitally signed with a self-signed certificate rather than a purchased one
-            - Our application doesn't yet have a reputation built with Microsoft
-            
-            These warnings don't indicate any actual security issue with the software.
+            Windows may show security warnings because this is a new application. These warnings are normal for new software and don't indicate any security issues.
             
             ## Need Help?
             

@@ -19,8 +19,14 @@ import json
 import webbrowser
 import threading
 
-# Ensure Python can find your "src" folder
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# Simple, reliable path handling
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable
+    sys.path.insert(0, os.path.dirname(sys.executable))
+else:
+    # Running in development environment
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, root_dir)
 
 # Import configuration
 from src.config import config
@@ -48,8 +54,13 @@ chainlit_process = None
 cognito_client = None
 if config.cognito_user_pool_id and config.cognito_client_id:
     try:
-        # Directly use the region from config properties
-        cognito_client = boto3.client('cognito-idp', region_name=config.aws_region)
+        # Create session with explicit credentials from config
+        session = boto3.Session(
+            aws_access_key_id=config.aws_access_key_id,
+            aws_secret_access_key=config.aws_secret_access_key,
+            region_name=config.aws_region
+        )
+        cognito_client = session.client('cognito-idp')
         logger.info("Cognito client initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize Cognito client: {str(e)}")

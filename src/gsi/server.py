@@ -12,8 +12,14 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
-# Ensure Python can find your "src" folder
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# Simple, reliable path handling
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable
+    sys.path.insert(0, os.path.dirname(sys.executable))
+else:
+    # Running in development environment
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, root_dir)
 
 # Import configuration
 from src.config import config

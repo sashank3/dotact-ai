@@ -90,6 +90,16 @@ class ConfigManager:
                 return default
         return current
 
+    def _get_embedded_credential(self, key):
+        """Get a credential from embedded credentials module."""
+        try:
+            import importlib
+            embedded = importlib.import_module('src.config.embedded_credentials')
+            return getattr(embedded, key)
+        except (ImportError, AttributeError):
+            logger.error(f"Failed to load embedded credential '{key}': {e}")
+            return None
+
     # UI & Chainlit properties
     @property
     def ui_config(self):
@@ -148,8 +158,31 @@ class ConfigManager:
         return self._config.get("data", {}).get("gsi", {})
     
     @property
-    def gsi_config_path(self):
-        return self.gsi_config.get("dota2", {}).get("gsi_config_path", "gamestate_integration_dotact.cfg")
+    def gsi_path(self):
+        """Get the actual path where the GSI configuration file should be placed"""
+        from src.bootstrap import is_frozen, get_application_root
+        import os
+        from src.utils.paths import read_steam_path_config
+        
+        if is_frozen():
+            # In production, read from steam_path.yaml to get the actual GSI path
+            app_root = get_application_root()
+            steam_config_path = os.path.join(app_root, 'steam_path.yaml')
+            
+            if os.path.exists(steam_config_path):
+                steam_config = read_steam_path_config(steam_config_path)
+                if steam_config and 'steam' in steam_config and 'gsi_path' in steam_config['steam']:
+                    # Combine the directory with the filename
+                    gsi_dir = steam_config['steam']['gsi_path']
+                    return os.path.join(gsi_dir, "gamestate_integration_dotact.cfg")
+            
+            logger.warning("GSI path not found in frozen application")
+            return None
+        else:
+            # In development, also return the full path
+            from src.utils.paths import get_config_path
+            config_dir = get_config_path()
+            return os.path.join(config_dir, self.gsi_config.get("dota2", {}).get("gsi_config_path", "gamestate_integration_dotact.cfg"))
     
     @property
     def state_file_path(self):
@@ -193,18 +226,27 @@ class ConfigManager:
     @property
     def aws_config(self):
         return self._config.get("secrets", {}).get("aws", {})
-    
+
     @property
     def aws_access_key_id(self):
-        return self.aws_config.get("access_key_id", "")
-    
+        from src.bootstrap import is_frozen
+        if is_frozen():
+            return self._get_embedded_credential('AWS_ACCESS_KEY_ID') or ""
+        return self.aws_config.get('access_key_id', "")
+
     @property
     def aws_secret_access_key(self):
-        return self.aws_config.get("secret_access_key", "")
-    
+        from src.bootstrap import is_frozen
+        if is_frozen():
+            return self._get_embedded_credential('AWS_SECRET_ACCESS_KEY') or ""
+        return self.aws_config.get('secret_access_key', "")
+
     @property
     def aws_region(self):
-        return self.aws_config.get("region", "us-east-2")
+        from src.bootstrap import is_frozen
+        if is_frozen():
+            return self._get_embedded_credential('AWS_REGION') or "us-east-2"
+        return self.aws_config.get('region', "us-east-2")
     
     # Lambda properties
     @property
@@ -264,11 +306,17 @@ class ConfigManager:
     
     @property
     def google_client_id(self):
-        return self.google_oauth_config.get("client_id", "")
+        from src.bootstrap import is_frozen
+        if is_frozen():
+            return self._get_embedded_credential('GOOGLE_CLIENT_ID') or ""
+        return self.google_oauth_config.get('client_id', "")
     
     @property
     def google_client_secret(self):
-        return self.google_oauth_config.get("client_secret", "")
+        from src.bootstrap import is_frozen
+        if is_frozen():
+            return self._get_embedded_credential('GOOGLE_CLIENT_SECRET') or ""
+        return self.google_oauth_config.get('client_secret', "")
     
     # Logging properties
     @property
@@ -278,6 +326,53 @@ class ConfigManager:
             "level": "INFO",
             "format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
         }
+    
+    @property
+    def uvicorn_log_config(self):
+        """
+        Provides a logging configuration dictionary for Uvicorn,
+        compatible with --windowed mode and designed to propagate
+        logs to the root logger (handled by LogManager).
+        Uses standard logging.Formatter which does not accept 'use_colors'.
+        """
+        return {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "()": "logging.Formatter", # Use standard Python Formatter
+                    "fmt": self.logging_config.get("format", "%(levelname)s:%(name)s:%(message)s"),
+                    "datefmt": "%Y-%m-%d %H:%M:%S", # Optional: match your date format
+                    # 'validate': False # Add if needed, but usually not required for basic format strings
+                },
+                "access": {
+                    "()": "logging.Formatter", # Use standard Python Formatter
+                    "fmt": self.logging_config.get("format", "%(levelname)s:%(name)s:%(message)s"), # Or specific access fmt
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                    # 'validate': False
+                },
+            },
+            "handlers": {
+                 # Still no handlers needed here; rely on propagation
+            },
+            "loggers": {
+                "uvicorn": {
+                    "handlers": [],
+                    "level": "INFO",
+                    "propagate": True,
+                },
+                "uvicorn.error": {
+                    "handlers": [],
+                    "level": "INFO",
+                    "propagate": True,
+                },
+                "uvicorn.access": {
+                    "handlers": [],
+                    "level": "INFO", # Adjust level as needed
+                    "propagate": True,
+                },
+            },
+        }
 
 # Create a singleton instance of the config manager
-config = ConfigManager() 
+config = ConfigManager()

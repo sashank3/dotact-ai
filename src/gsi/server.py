@@ -112,14 +112,20 @@ def run_gsi_server(host=None, port=None):
     # Log the configuration
     logger.info(f"Starting GSI server on {host}:{port}")
     
-    # Use uvicorn.Config and Server classes for thread-safe operation
-    config_uvicorn = uvicorn.Config(
-        app="src.gsi.server:gsi_app",
-        host=host,
-        port=port,
-        reload=False,
-        log_level="info",
-        access_log=False  # Disable access logs completely
-    )
-    server = uvicorn.Server(config_uvicorn)
-    server.run()
+    try:
+        # Use uvicorn.Config and Server classes for thread-safe operation
+        config_uvicorn = uvicorn.Config(
+            app="src.gsi.server:gsi_app",
+            host=host,
+            port=port,
+            reload=False,
+            log_level="info",
+            access_log=False,
+            log_config=config.uvicorn_log_config
+        )
+        server = uvicorn.Server(config_uvicorn)
+        server.run()
+    except Exception as e:
+        logger.exception(f"CRITICAL ERROR during GSI server run() execution: {e}")
+    finally:
+        logger.info("run_gsi_server function finished or failed.")

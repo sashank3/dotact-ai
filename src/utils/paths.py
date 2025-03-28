@@ -2,6 +2,7 @@ import os
 import sys
 from src.bootstrap import is_frozen, get_application_root
 import logging
+import yaml
 
 def get_config_path():
     """
@@ -69,27 +70,53 @@ def get_logs_path():
         os.makedirs(logs_path, exist_ok=True)
         return logs_path
 
-def get_steam_path_config():
+def read_steam_path_config(config_path):
     """
-    Returns the path to the steam_path.yaml configuration file.
-    
-    This file is installed alongside the application executable.
+    Safely reads the steam_path.yaml file, handling Windows path backslashes correctly.
+    Returns a dictionary with the Steam configuration.
     """
-    # First priority: Check application root (where keenmind.exe is)
-    app_root = get_application_root()
-    steam_config_path = os.path.join(app_root, 'steam_path.yaml')
-    
-    if os.path.exists(steam_config_path):
-        logging.info(f"Using steam path config from application directory: {steam_config_path}")
-        return steam_config_path
-    
-    # In development, check the repo config dir
-    if not is_frozen():
-        app_config_dir = os.path.join(get_application_root(), 'config')
-        steam_config_path = os.path.join(app_config_dir, 'steam_path.yaml')
-        if os.path.exists(steam_config_path):
-            return steam_config_path
-    
-    # If not found anywhere, return None
-    logging.warning("Steam path configuration not found")
-    return None 
+    if not config_path or not os.path.exists(config_path):
+        return None
+        
+    try:
+        # First try raw reading the file to handle it directly
+        with open(config_path, 'r') as file:
+            content = file.read()
+            
+        # Create a basic structure that matches expected format
+        config = {'steam': {}}
+        
+        # Direct pattern matching for the specific fields we need
+        path_match = content.find('path:')
+        gsi_path_match = content.find('gsi_path:')
+        
+        # Extract the path values
+        if path_match != -1:
+            path_line = content[path_match:].split('\n')[0]
+            path_value = path_line.split(':', 1)[1].strip()
+            if path_value.startswith('"') and path_value.endswith('"'):
+                path_value = path_value[1:-1]
+            config['steam']['path'] = path_value
+            
+        if gsi_path_match != -1:
+            gsi_line = content[gsi_path_match:].split('\n')[0]
+            gsi_value = gsi_line.split(':', 1)[1].strip()
+            if gsi_value.startswith('"') and gsi_value.endswith('"'):
+                gsi_value = gsi_value[1:-1]
+            config['steam']['gsi_path'] = gsi_value
+            
+        # Add first_install flag if it exists in the file
+        if 'first_install:' in content:
+            first_install_line = content[content.find('first_install:'):].split('\n')[0]
+            first_install_value = first_install_line.split(':', 1)[1].strip().lower()
+            config['steam']['first_install'] = first_install_value == 'true'
+            
+        # Validate that we have the minimum required fields
+        if not config['steam'].get('path') or not config['steam'].get('gsi_path'):
+            logging.warning("Missing required fields in steam configuration")
+            
+        return config
+            
+    except Exception as e:
+        logging.error(f"Failed to parse steam configuration file: {e}")
+        return None 

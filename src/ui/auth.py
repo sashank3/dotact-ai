@@ -349,59 +349,95 @@ async def direct_login():
 
 @auth_app.on_event("shutdown")
 async def shutdown_event():
-    """Clean up resources when the server shuts down."""
     global chainlit_process, is_chainlit_running
     if chainlit_process is not None:
-        logger.info("Shutting down Chainlit server")
+        logger.info("Attempting to shut down Chainlit server...")
         try:
-            chainlit_process.terminate()
-            chainlit_process.wait(timeout=5)
-            logger.info("Chainlit server terminated")
+            if chainlit_process.poll() is None: # Check if it's still running
+                 chainlit_process.terminate()
+                 chainlit_process.wait(timeout=5) # Wait briefly for termination
+                 logger.info("Chainlit server terminated.")
+            else:
+                 logger.info("Chainlit server process was already terminated.")
+        except subprocess.TimeoutExpired:
+             logger.warning("Chainlit server did not terminate within timeout, attempting to kill.")
+             chainlit_process.kill()
+             chainlit_process.wait(timeout=2)
+             logger.info("Chainlit server killed.")
         except Exception as e:
-            logger.error(f"Error terminating Chainlit: {str(e)}")
+            logger.error(f"Error during Chainlit shutdown: {e}", exc_info=True)
         finally:
             chainlit_process = None
             is_chainlit_running = False
 
 def start_chainlit():
-    """Start the Chainlit server in a subprocess."""
+    """Start the Chainlit server using the bundled Python interpreter."""
     global chainlit_process, is_chainlit_running
-    
+
     if chainlit_process is not None and chainlit_process.poll() is None:
-        # Process already running
-        logger.info("Chainlit server already running")
+        logger.info("Chainlit server already running.")
         is_chainlit_running = True
         return
-        
-    command = f"chainlit run {config.chainlit_app_path} --port {config.chainlit_port} --headless"
-    
-    logger.info(f"Starting Chainlit server on port {config.chainlit_port} with app {config.chainlit_app_path}")
-    
+
+    logger.info(f"Preparing to start Chainlit server on port {config.chainlit_port} with app {config.chainlit_app_path}")
+
     try:
-        # Start chainlit in a subprocess
+        # Construct the command as a list
+        command = [
+            sys.executable,             # Path to the bundled Python executable
+            "-m",                       # Run module as script
+            "chainlit",                 # The chainlit module
+            "run",                      # The 'run' command for chainlit
+            config.chainlit_app_path,   # Path to your chainlit app script
+            "--port",
+            str(config.chainlit_port),  # Port number
+            "--headless"                # Keep headless mode
+        ]
+
+        logger.info(f"Executing command: {' '.join(command)}") # Log the command being run
+
+        # Define creation flags for Windows to hide console window
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW
+
+        # Start chainlit using the specific Python executable, without the shell
         chainlit_process = subprocess.Popen(
             command,
-            shell=True,
+            shell=False,  # IMPORTANT: Do NOT use shell=True with a list command
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            creationflags=creationflags # Hide console window on Windows
         )
-        
-        # Give Chainlit time to start up
+
+        # Optional: Brief wait to see if it fails immediately
         time.sleep(2)
-        
+
         if chainlit_process.poll() is None:
-            # Process is still running, which is good
+            # Process is still running after the brief wait
             is_chainlit_running = True
-            logger.info("Chainlit server started")
+            logger.info(f"Chainlit server process started successfully (PID: {chainlit_process.pid}).")
         else:
-            # Process exited already, which is bad
-            stdout, stderr = chainlit_process.communicate()
-            logger.error(f"Chainlit server failed to start: {stderr}")
-            chainlit_process = None
+            # Process terminated quickly, likely an error
+            stdout, stderr = chainlit_process.communicate() # Get output
+            logger.error(f"Chainlit server failed to start. Return code: {chainlit_process.returncode}")
+            if stdout:
+                logger.error(f"Chainlit stdout:\n{stdout}")
+            if stderr:
+                logger.error(f"Chainlit stderr:\n{stderr}") # This should contain the error message
+            chainlit_process = None # Reset the global variable
+            is_chainlit_running = False
+
+    except FileNotFoundError:
+         # This might happen if sys.executable is somehow incorrect, though unlikely
+         logger.error(f"Error starting Chainlit: Could not find Python executable at '{sys.executable}'", exc_info=True)
+         chainlit_process = None
+         is_chainlit_running = False
     except Exception as e:
-        logger.error(f"Error starting Chainlit: {str(e)}")
+        logger.error(f"An unexpected error occurred starting Chainlit: {e}", exc_info=True)
         chainlit_process = None
+        is_chainlit_running = False
 
 def run_auth_server(host="0.0.0.0", port=None):
     """Start the authentication server."""
@@ -422,12 +458,19 @@ def run_auth_server(host="0.0.0.0", port=None):
     browser_thread.daemon = True
     browser_thread.start()
     
-    # Use uvicorn.Config and Server classes for thread-safe operation
-    config_uvicorn = uvicorn.Config(
-        app=auth_app,
-        host=host,
-        port=port,
-        log_level="info"
-    )
-    server = uvicorn.Server(config_uvicorn)
-    server.run() 
+    try:
+        # Use uvicorn.Config and Server classes for thread-safe operation
+        config_uvicorn = uvicorn.Config(
+            app=auth_app,
+            host=host,
+            port=port,
+            log_level="info",
+            access_log=False,
+            log_config=config.uvicorn_log_config
+        )
+        server = uvicorn.Server(config_uvicorn)
+        server.run()
+    except Exception as e:
+        logger.exception(f"CRITICAL ERROR during Auth server run() execution: {e}")
+    finally:
+        logger.info("run_auth_server function finished or failed.")

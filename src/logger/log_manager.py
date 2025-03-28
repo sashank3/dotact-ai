@@ -7,6 +7,7 @@ from datetime import datetime
 from functools import wraps
 from logging.handlers import QueueHandler, QueueListener
 from src.config import config
+from src.bootstrap import is_frozen
 
 class LogManager:
     _instance = None
@@ -47,57 +48,116 @@ class LogManager:
     def _configure_logging(self):
         # Clear existing handlers to prevent duplicates
         root_logger = logging.getLogger()
+        # Stop listener if it exists before removing handlers
+        if hasattr(self, 'queue_listener') and self.queue_listener:
+             try:
+                 self.queue_listener.stop()
+             except Exception as e:
+                 # Use print here as logging might be broken during reconfiguration
+                 print(f"Error stopping existing queue listener: {e}", file=sys.stderr)
+             self.queue_listener = None # Ensure it's reset
+
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
+            # Attempt to close handler if possible
+            try:
+                handler.close()
+            except Exception:
+                pass # Ignore errors closing handlers
 
         # Create log formatter
-        formatter = logging.Formatter(config.logging_config["format"])
-        
+        log_format = config.logging_config.get("format", "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s")
+        formatter = logging.Formatter(log_format)
+
         # Create a log queue for async-safe logging
-        self.log_queue = queue.Queue(-1)  # No limit on size
-        
-        # Create handlers
+        if not hasattr(self, 'log_queue') or self.log_queue is None:
+             self.log_queue = queue.Queue(-1) # No limit on size
+
+        # --- Create handlers ---
+        handlers_for_listener = []
+
         # 1. Main log file handler (keenmind.log) - logs everything
-        main_file_handler = logging.FileHandler(self.keenmind_log_file)
-        main_file_handler.setFormatter(formatter)
-        main_file_handler.setLevel(config.logging_config["level"])
-        
+        try:
+            main_file_handler = logging.FileHandler(self.keenmind_log_file, mode='a', encoding='utf-8')
+            main_file_handler.setFormatter(formatter)
+            main_file_handler.setLevel(config.logging_config.get("level", logging.INFO))
+            handlers_for_listener.append(main_file_handler)
+        except Exception as e:
+            print(f"Error creating main log file handler: {e}", file=sys.stderr)
+
+
         # 2. Error log file handler (error.log) - logs warnings and errors only
-        error_file_handler = logging.FileHandler(self.error_log_file)
-        error_file_handler.setFormatter(formatter)
-        error_file_handler.setLevel(logging.WARNING)  # WARNING and higher (ERROR, CRITICAL)
-        
-        # Console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(config.logging_config["level"])
-        
+        try:
+            error_file_handler = logging.FileHandler(self.error_log_file, mode='a', encoding='utf-8')
+            error_file_handler.setFormatter(formatter)
+            error_file_handler.setLevel(logging.WARNING) # WARNING and higher (ERROR, CRITICAL)
+            handlers_for_listener.append(error_file_handler)
+        except Exception as e:
+            print(f"Error creating error log file handler: {e}", file=sys.stderr)
+
+
+        # 3. Console handler - Conditionally add only if NOT frozen (windowed)
+        if not is_frozen():
+            try:
+                # Check if stdout is valid before creating handler
+                if sys.stdout:
+                    console_handler = logging.StreamHandler(sys.stdout)
+                    console_handler.setFormatter(formatter)
+                    console_handler.setLevel(config.logging_config.get("level", logging.INFO))
+                    handlers_for_listener.append(console_handler)
+                else:
+                     # Use print as logging might not be fully working
+                     print("[LogManager] sys.stdout is None, console handler disabled.", file=sys.stderr)
+            except Exception as e:
+                 print(f"Error creating console handler: {e}", file=sys.stderr)
+        else:
+             # Use print as logging might not be fully working
+             print("[LogManager] Frozen mode detected, console handler disabled.", file=sys.stderr)
+
+
         # Setup the queue listener (runs in a separate thread)
-        self.queue_listener = QueueListener(
-            self.log_queue, 
-            main_file_handler,
-            error_file_handler,
-            console_handler,
-            respect_handler_level=True
-        )
-        
+        # Only proceed if we have valid handlers
+        if handlers_for_listener:
+            self.queue_listener = QueueListener(
+                self.log_queue,
+                *handlers_for_listener, # Pass the list of handlers
+                respect_handler_level=True
+            )
+        else:
+             print("[LogManager] No valid handlers configured for QueueListener!", file=sys.stderr)
+             self.queue_listener = None # Ensure listener is None if setup failed
+
         # Setup the queue handler (used by loggers)
         queue_handler = QueueHandler(self.log_queue)
-        
+
         # Configure the root logger
         root_logger.addHandler(queue_handler)
-        root_logger.setLevel(config.logging_config["level"])
-        
-        # Set specific module log levels
+        root_logger.setLevel(config.logging_config.get("level", logging.INFO))
+
+        # Set specific module log levels (Consider moving these to your config file)
         logging.getLogger('src.cloud.api').setLevel(logging.DEBUG)
         logging.getLogger('src.ui.chainlit_app').setLevel(logging.DEBUG)
         logging.getLogger('src.ui.auth').setLevel(logging.DEBUG)
-        
-        # Start the queue listener in a background thread
-        self.queue_listener.start()
-        
-        # Override standard logging debug/info/warning/error methods with safe versions
-        self._patch_logging_methods()
+        # Consider adjusting uvicorn levels if needed, though log_config handles its internal setup
+        logging.getLogger('uvicorn').setLevel(logging.INFO)
+        logging.getLogger('uvicorn.error').setLevel(logging.INFO)
+        logging.getLogger('uvicorn.access').setLevel(logging.WARNING) # Keep access logs quieter at root level
+
+        # Start the queue listener in a background thread if it was created
+        if self.queue_listener:
+            self.queue_listener.start()
+            # Use print initially as logging might rely on the listener
+            print("[LogManager] QueueListener started.")
+        else:
+            print("[LogManager] QueueListener not started due to handler errors.", file=sys.stderr)
+
+
+        # Patching logging methods might not be necessary if QueueHandler solves blocking,
+        # but keep if you handle very large objects frequently.
+        # Ensure patching happens only once if _configure_logging can be called multiple times.
+        if not hasattr(self, '_logging_patched') or not self._logging_patched:
+             self._patch_logging_methods()
+             self._logging_patched = True
 
     def _patch_logging_methods(self):
         """

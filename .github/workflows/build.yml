@@ -9,34 +9,32 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
-    
+
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller==6.1.0
           pip install aiofiles==23.2.1 aiohttp==3.11.13 fastapi==0.115.8 itsdangerous==2.2.0 numpy==2.2.2 openai==1.61.1 python-dotenv==1.0.1 python-jose==3.4.0 pyyaml==6.0.2 requests==2.32.3 uvicorn==0.34.0 chainlit==2.2.1
-          # Install boto3 only minimally for Cognito
-          pip install boto3==1.37.4 --no-deps
-          pip install botocore==1.34.4 --no-deps
+          pip install boto3==1.26.0
           pip install jmespath==1.0.1 s3transfer==0.10.0
-      
+
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
         shell: bash
-      
+
       - name: Create version file
         run: |
           echo "__version__ = '${{ env.VERSION }}'" > src/version.py
-      
+
       - name: Prepare app icon
         run: |
           pip install pillow
@@ -48,7 +46,7 @@ jobs:
         run: |
           $version = "${{ env.VERSION }}"
           $version_comma = $version.Replace(".", ",")
-          
+
           echo "# UTF-8
           VSVersionInfo(
             ffi=FixedFileInfo(
@@ -74,11 +72,49 @@ jobs:
                   StringStruct(u'OriginalFilename', u'keenmind.exe'),
                   StringStruct(u'ProductName', u'Keenmind'),
                   StringStruct(u'ProductVersion', u'${{ env.VERSION }}')])
-                ]), 
+                ]),
               VarFileInfo([VarStruct(u'Translation', [1033, 1252])])
             ]
           )" > file_version_info.txt
         shell: pwsh
+
+      # --- MOVED STEP: Create credentials file BEFORE PyInstaller runs ---
+      # This ensures the generated Python file exists when PyInstaller scans the source tree,
+      # allowing it to be compiled to bytecode and embedded in the final executable.
+      # Security Note: Embedding as bytecode is obscurity, not strong security.
+      # The secrets can potentially be recovered via decompilation.
+      - name: Create embedded credentials module
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          # Create credentials module directly in the src directory
+          $credentialsModule = @"
+          """
+          Module containing embedded credentials for production environments.
+          This module is automatically generated during build and embedded in the executable.
+          WARNING: Contains sensitive information, not meant to be read directly.
+          """
+
+          # AWS Credentials
+          AWS_ACCESS_KEY_ID = "$env:AWS_ACCESS_KEY_ID"
+          AWS_SECRET_ACCESS_KEY = "$env:AWS_SECRET_ACCESS_KEY"
+          AWS_REGION = "us-east-2" # Hardcoding region is fine if it doesn't change
+
+          # Google OAuth Credentials
+          GOOGLE_CLIENT_ID = "$env:GOOGLE_CLIENT_ID"
+          GOOGLE_CLIENT_SECRET = "$env:GOOGLE_CLIENT_SECRET"
+          "@
+
+          # Ensure the target directory exists
+          New-Item -Path "src/config" -ItemType Directory -Force
+          # Create the Python file
+          Set-Content -Path "src/config/embedded_credentials.py" -Value $credentialsModule
+          Write-Host "Created embedded credentials module at src/config/embedded_credentials.py"
+        shell: pwsh
+      # --- END OF MOVED STEP ---
 
       - name: Build with PyInstaller
         run: |
@@ -105,13 +141,16 @@ jobs:
             </compatibility>
           </assembly>' > keenmind.manifest
 
-          # Copy config files (except secrets) to build directory
+          # Copy config files (except secrets) to build directory for --add-data
+          # Note: The src/config/embedded_credentials.py is NOT copied here;
+          # it's treated as source code because it was created before this step.
           mkdir -p build/config
           Copy-Item "config/gsi_config.yaml" -Destination "build/config/"
           Copy-Item "config/ui_config.yaml" -Destination "build/config/"
           Copy-Item "config/cloud_config.yaml" -Destination "build/config/"
 
           # Build with more conservative options that are less likely to trigger AV
+          # PyInstaller will now find and embed src/config/embedded_credentials.py as bytecode
           pyinstaller --clean `
             --name keenmind `
             --icon="resources/app_icon.ico" `
@@ -145,64 +184,12 @@ jobs:
             --version-file="file_version_info.txt" `
             --noupx `
             main.py
-            
+
           # Create reputation-building files
-          Set-Content -Path "dist/keenmind/README.txt" -Value "Keenmind v${{ env.VERSION }}`n`nOfficial website: https://github.com/dotact-ai/keenmind`nPublisher: DotACT AI`n`nThis software is safe to use.`n"
-          
-          # Create license agreement
-          $licenseContent = @'
-          END USER LICENSE AGREEMENT
-
-          IMPORTANT: PLEASE READ THIS END USER LICENSE AGREEMENT CAREFULLY BEFORE INSTALLING OR USING KEENMIND SOFTWARE.
-
-          1. ACCEPTANCE OF TERMS
-          By installing, accessing, or using the Keenmind software ("Software"), you agree to be bound by the terms of this End User License Agreement ("Agreement"). If you do not agree to these terms, do not install, access, or use the Software.
-
-          2. LICENSE GRANT
-          Subject to the terms of this Agreement, DotACT AI grants you a limited, non-exclusive, non-transferable license to use the Software for your personal or internal business purposes.
-
-          3. RESTRICTIONS
-          You may not:
-          (a) Modify, adapt, translate, reverse engineer, decompile, disassemble, or create derivative works based on the Software;
-          (b) Rent, lease, loan, sell, distribute, or sublicense the Software;
-          (c) Remove or alter any proprietary notices or labels on the Software;
-          (d) Use the Software for any illegal purpose or in any manner that violates applicable laws or regulations.
-
-          4. OWNERSHIP
-          The Software is owned and copyrighted by DotACT AI. Your license confers no title or ownership in the Software and is not a sale of any rights in the Software.
-
-          5. DISCLAIMER OF WARRANTIES
-          THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. DOTACT AI MAKES NO WARRANTY THAT THE SOFTWARE WILL MEET YOUR REQUIREMENTS OR THAT THE OPERATION OF THE SOFTWARE WILL BE UNINTERRUPTED OR ERROR-FREE.
-
-          6. LIMITATION OF LIABILITY
-          TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL DOTACT AI BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, CONSEQUENTIAL, OR PUNITIVE DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF PROFITS, BUSINESS INTERRUPTION, LOSS OF INFORMATION, OR ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR INABILITY TO USE THE SOFTWARE, EVEN IF DOTACT AI HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. IN ANY CASE, DOTACT AI'S ENTIRE LIABILITY UNDER ANY PROVISION OF THIS AGREEMENT SHALL BE LIMITED TO THE AMOUNT ACTUALLY PAID BY YOU FOR THE SOFTWARE.
-
-          7. INDEMNIFICATION
-          You agree to indemnify, defend, and hold harmless DotACT AI, its officers, directors, employees, agents, and suppliers from and against all claims, losses, expenses, damages, and costs, including reasonable attorneys' fees, resulting from any violation of this Agreement by you or any activity related to your account (including negligent or wrongful conduct) by you or any other person accessing the Software using your account.
-
-          8. NO THIRD-PARTY BENEFICIARIES
-          This Agreement does not confer any third-party beneficiary rights.
-
-          9. WAIVER OF CLASS ACTIONS
-          ANY DISPUTE RESOLUTION PROCEEDINGS, WHETHER IN ARBITRATION OR COURT, WILL BE CONDUCTED ONLY ON AN INDIVIDUAL BASIS AND NOT IN A CLASS OR REPRESENTATIVE ACTION OR AS A NAMED OR UNNAMED MEMBER IN A CLASS, CONSOLIDATED, REPRESENTATIVE OR PRIVATE ATTORNEY GENERAL LEGAL ACTION.
-
-          10. GOVERNING LAW
-          This Agreement shall be governed by and construed in accordance with the laws of the State of California without giving effect to any principles of conflicts of law. Any legal action or proceeding relating to this Agreement shall be brought exclusively in the state or federal courts located in San Francisco, California.
-
-          11. AMENDMENTS
-          DotACT AI reserves the right, at its sole discretion, to modify or replace this Agreement at any time.
-
-          12. SURVIVAL
-          Sections 3, 4, 5, 6, 7, 9, 10, and 12 shall survive termination of this Agreement.
-
-          13. SECURITY AND DATA COLLECTION
-          The Software does not collect any personal data beyond what is strictly necessary for authentication and functionality. All data processing is transparent and only with user consent.
-
-          BY INSTALLING OR USING THE SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT, UNDERSTAND IT, AND AGREE TO BE BOUND BY ITS TERMS AND CONDITIONS.
-          '@
-          Set-Content -Path "dist/keenmind/LICENSE.txt" -Value $licenseContent
+          Set-Content -Path "dist/keenmind/README.txt" -Value "Keenmind v${{ env.VERSION }}`n`nPublisher: DotACT AI`n`nThis software is digitally signed and safe to use.`n"
+          Set-Content -Path "dist/keenmind/VERIFICATION.txt" -Value "This software was created by DotACT AI and has been digitally signed.`n`nTo verify the signature:`n1. Right-click on keenmind.exe`n2. Select Properties`n3. Go to the Digital Signatures tab`n4. You should see a signature from DotACT AI`n"
         shell: pwsh
-      
+
       - name: Create enhanced self-signed certificate
         run: |
           # Create a stronger self-signed certificate with more trusted attributes
@@ -217,16 +204,16 @@ jobs:
             -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" `
             -NotAfter (Get-Date).AddYears(3) `
             -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
-          
+
           $certPath = "Cert:\CurrentUser\My\$($cert.Thumbprint)"
           $pfxPath = "codesign.pfx"
           $password = ConvertTo-SecureString -String "password" -Force -AsPlainText
           Export-PfxCertificate -Cert $certPath -FilePath $pfxPath -Password $password
-          
+
           # Add certificate to trusted root
           Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\LocalMachine\Root -Password $password
           Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\LocalMachine\TrustedPublisher -Password $password
-          
+
           # Find signtool and sign the executable with extended attributes
           $signtoolPath = $null
           $possiblePaths = @(
@@ -234,32 +221,84 @@ jobs:
             "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe",
             "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
           )
-          
+
           foreach ($path in $possiblePaths) {
             if (Test-Path $path) {
               $signtoolPath = $path
               break
             }
           }
-          
+
           if (-not $signtoolPath) {
             $signtoolPath = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1).FullName
           }
-          
+
           if ($signtoolPath -and (Test-Path "dist\keenmind\keenmind.exe")) {
             Write-Host "Using signtool at: $signtoolPath"
             # Sign with enhanced attributes and timestamping
-            & $signtoolPath sign /f $pfxPath /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /as /d "Keenmind - AI Assistant for Dota 2" /du "https://github.com/dotact-ai/keenmind" dist\keenmind\keenmind.exe
+            & $signtoolPath sign /f $pfxPath /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /as /d "Keenmind - AI Assistant for Dota 2" /du "https://dotactai.com" dist\keenmind\keenmind.exe
           } else {
             Write-Host "Signtool.exe not found or executable does not exist at expected path. Skipping code signing."
           }
         shell: pwsh
         continue-on-error: true
-      
+
       - name: Install Inno Setup
         run: |
           choco install innosetup -y
-          
+
+      - name: Create license agreement file
+        run: |
+          Set-Content -Path "license.txt" -Value @"
+          END USER LICENSE AGREEMENT FOR KEENMIND SOFTWARE
+
+          IMPORTANT - READ CAREFULLY: This End User License Agreement ("EULA") is a legal agreement between you (either an individual or a single entity) and DotACT AI for the Keenmind software product identified above, which includes computer software and associated media and documentation ("SOFTWARE PRODUCT"). By installing, copying, or otherwise using the SOFTWARE PRODUCT, you agree to be bound by the terms of this EULA. If you do not agree to the terms of this EULA, do not install or use the SOFTWARE PRODUCT.
+
+          1. GRANT OF LICENSE
+          The SOFTWARE PRODUCT is licensed, not sold. This EULA grants you the following rights:
+
+          a. Installation and Use. You may install and use an unlimited number of copies of the SOFTWARE PRODUCT on your devices.
+          b. Reproduction and Distribution. You may not reproduce or distribute the SOFTWARE PRODUCT except for personal use.
+
+          2. DESCRIPTION OF OTHER RIGHTS AND LIMITATIONS
+          a. Maintenance of Copyright Notices. You must not remove or alter any copyright notices on any copy of the SOFTWARE PRODUCT.
+          b. Distribution. You may not distribute copies of the SOFTWARE PRODUCT to third parties.
+          c. Prohibition on Reverse Engineering, Decompilation, and Disassembly. You may not reverse engineer, decompile, or disassemble the SOFTWARE PRODUCT, except and only to the extent that such activity is expressly permitted by applicable law notwithstanding this limitation.
+          d. Rental. You may not rent, lease, or lend the SOFTWARE PRODUCT.
+          e. Support Services. No support services will be provided for the SOFTWARE PRODUCT.
+          f. Compliance with Applicable Laws. You must comply with all applicable laws regarding use of the SOFTWARE PRODUCT.
+
+          3. COPYRIGHT
+          All title, including but not limited to copyrights, in and to the SOFTWARE PRODUCT and any copies thereof are owned by DotACT AI or its suppliers. All title and intellectual property rights in and to the content which may be accessed through use of the SOFTWARE PRODUCT is the property of the respective content owner and may be protected by applicable copyright or other intellectual property laws and treaties. This EULA grants you no rights to use such content.
+
+          4. NO WARRANTIES
+          DotACT AI expressly disclaims any warranty for the SOFTWARE PRODUCT. The SOFTWARE PRODUCT is provided 'AS IS' without any express or implied warranty of any kind, including but not limited to any warranties of merchantability, noninfringement, or fitness of a particular purpose. DotACT AI does not warrant or assume responsibility for the accuracy or completeness of any information, text, graphics, links or other items contained within the SOFTWARE PRODUCT. DotACT AI makes no warranties respecting any harm that may be caused by the transmission of a computer virus, worm, time bomb, logic bomb, or other such computer program. DotACT AI further expressly disclaims any warranty or representation to Authorized Users or to any third party.
+
+          5. LIMITATION OF LIABILITY
+          In no event shall DotACT AI be liable for any damages (including, without limitation, lost profits, business interruption, or lost information) rising out of Authorized Users' use of or inability to use the SOFTWARE PRODUCT, even if DotACT AI has been advised of the possibility of such damages. In no event will DotACT AI be liable for loss of data or for indirect, special, incidental, consequential (including lost profit), or other damages based in contract, tort or otherwise. DotACT AI shall have no liability with respect to the content of the SOFTWARE PRODUCT or any part thereof, including but not limited to errors or omissions contained therein, libel, infringements of rights of publicity, privacy, trademark rights, business interruption, personal injury, loss of privacy, moral rights or the disclosure of confidential information.
+
+          6. EXTERNAL SERVICES
+          The SOFTWARE PRODUCT may provide access to external services including, but not limited to, AI language models, data processing services, and other third-party services. DotACT AI is not responsible for and does not endorse the content or availability of these services. All use of external services is subject to the terms and conditions of those services.
+
+          7. USER DATA AND PRIVACY
+          The SOFTWARE PRODUCT may collect and transmit data about your use of the software, including but not limited to, system information, usage patterns, and content provided to external services. By using the SOFTWARE PRODUCT, you consent to this data collection as needed for the operation and improvement of the software. DotACT AI will not sell your personal data to third parties.
+
+          8. INDEMNIFICATION
+          You agree to indemnify, defend and hold harmless DotACT AI, its affiliates, officers, directors, employees, consultants and agents from any and all third party claims, liability, damages and/or costs (including, but not limited to, attorneys' fees) arising from your use of the SOFTWARE PRODUCT, your violation of this EULA, or your infringement of any intellectual property or other right of any person or entity.
+
+          9. TERMINATION
+          Without prejudice to any other rights, DotACT AI may terminate this EULA if you fail to comply with the terms and conditions of this EULA. In such event, you must destroy all copies of the SOFTWARE PRODUCT.
+
+          10. GOVERNING LAW
+          This EULA shall be governed by the laws of the State of California, USA, without regard to its conflict of law provisions. The parties consent to the exclusive jurisdiction and venue in the federal and state courts in San Francisco, California.
+
+          11. ENTIRE AGREEMENT
+          This EULA (including any addendum or amendment to this EULA which is included with the SOFTWARE PRODUCT) is the entire agreement between you and DotACT AI relating to the SOFTWARE PRODUCT and supersedes all prior or contemporaneous oral or written communications, proposals and representations with respect to the SOFTWARE PRODUCT or any other subject matter covered by this EULA.
+
+          BY USING THE SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT, UNDERSTAND IT, AND AGREE TO BE BOUND BY ITS TERMS AND CONDITIONS.
+          "@
+        shell: pwsh
+
       - name: Create Inno Setup script
         run: |
           echo '[Setup]
@@ -267,14 +306,11 @@ jobs:
           AppVersion=${{ env.VERSION }}
           AppVerName=Keenmind ${{ env.VERSION }}
           AppPublisher=DotACT AI
-          AppPublisherURL=https://github.com/dotact-ai/keenmind
-          AppSupportURL=https://github.com/dotact-ai/keenmind/issues
-          AppUpdatesURL=https://github.com/dotact-ai/keenmind/releases
           AppCopyright=Copyright © 2024 DotACT AI
           DefaultDirName={pf}\Keenmind
           DefaultGroupName=Keenmind
-          LicenseFile=dist\keenmind\LICENSE.txt
-          InfoBeforeFile=dist\keenmind\README.txt
+          LicenseFile=license.txt
+          InfoBeforeFile=dist\keenmind\VERIFICATION.txt
           UninstallDisplayIcon={app}\keenmind.exe
           OutputDir=.
           OutputBaseFilename=keenmind_setup_${{ env.VERSION }}
@@ -288,37 +324,39 @@ jobs:
           DisableDirPage=no
           DisableProgramGroupPage=no
           DisableReadyPage=no
-          
+
           [Tasks]
           Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"; Flags: checkedonce
-          
+
           [Files]
           Source: "dist\keenmind\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
           Source: "images\app_logo.png"; DestDir: "{app}\images"; Flags: ignoreversion
-          
+
           [Icons]
           Name: "{group}\Keenmind"; Filename: "{app}\keenmind.exe"; Comment: "Launch Keenmind AI Assistant"
           Name: "{group}\Uninstall Keenmind"; Filename: "{uninstallexe}"
           Name: "{commondesktop}\Keenmind"; Filename: "{app}\keenmind.exe"; Tasks: desktopicon; Comment: "Launch Keenmind AI Assistant"
-          
+
           [Run]
           Filename: "{app}\keenmind.exe"; Description: "Launch Keenmind"; Flags: nowait postinstall skipifsilent
-          
+
           [Code]
           var
             SteamPathPage: TInputDirWizardPage;
             DefaultSteamPath: String;
+            SteamPathStr: String;
+            GsiConfigPathStr: String;
 
           procedure InitializeWizard;
           begin
             { Create Steam path selection page }
             SteamPathPage := CreateInputDirPage(wpSelectDir,
-              ''Steam Installation Folder'', 
+              ''Steam Installation Folder'',
               ''Where is Steam installed on your computer?'',
               ''The installer needs to know where Steam is installed to configure Dota 2 Game State Integration.'' + #13#10 +
               ''Please specify the location of your Steam installation folder (not the Dota 2 folder):'',
               False, '''');
-              
+
             { Set default Steam path - common locations }
             if DirExists(ExpandConstant(''{pf}\Steam'')) then
               DefaultSteamPath := ExpandConstant(''{pf}\Steam'')
@@ -330,63 +368,72 @@ jobs:
               DefaultSteamPath := ''C:\Program Files (x86)\Steam''
             else
               DefaultSteamPath := ExpandConstant(''{pf(x86)}\Steam'');
-              
+
             SteamPathPage.Add('''');
             SteamPathPage.Values[0] := DefaultSteamPath;
           end;
 
           function NextButtonClick(CurPageID: Integer): Boolean;
-          var
-            SteamPath, GsiConfigPath, YamlContent: String;
-            YamlFile: String;
           begin
             Result := True;
-            
+
             if CurPageID = SteamPathPage.ID then
             begin
               { Validate Steam path }
-              SteamPath := SteamPathPage.Values[0];
-              if not DirExists(SteamPath) then
+              SteamPathStr := SteamPathPage.Values[0];
+              if not DirExists(SteamPathStr) then
               begin
                 MsgBox(''The specified Steam folder does not exist. Please select a valid Steam installation folder.'', mbError, MB_OK);
                 Result := False;
                 Exit;
               end;
-              
+
               { Check for steamapps folder }
-              if not DirExists(SteamPath + ''\steamapps'') then
+              if not DirExists(SteamPathStr + ''\steamapps'') then
               begin
                 MsgBox(''This does not appear to be a valid Steam installation. The steamapps folder was not found.'', mbError, MB_OK);
                 Result := False;
                 Exit;
               end;
-              
-              { Save GSI config path to YAML file in the app directory }
-              GsiConfigPath := SteamPath + ''\steamapps\common\dota 2 beta\game\dota\cfg\gamestate_integration'';
-              
-              { Steam path config goes directly in the app directory }
-              YamlFile := ExpandConstant(''{app}\steam_path.yaml'');
-              
-              { Create YAML content }
-              YamlContent := ''steam:'' + #13#10 + 
-                             ''  path: "'' + SteamPath + ''"'' + #13#10 +
-                             ''  gsi_path: "'' + GsiConfigPath + ''"'' + #13#10;
-              
-              { Save YAML file }
-              if not SaveStringToFile(YamlFile, YamlContent, False) then
+
+              { Store GSI path for later use }
+              GsiConfigPathStr := SteamPathStr + ''\steamapps\common\dota 2 beta\game\dota\cfg\gamestate_integration'';
+            end;
+          end;
+
+          procedure CurStepChanged(CurStep: TSetupStep);
+          var
+            YamlContent: String;
+            YamlFile: String;
+          begin
+            if CurStep = ssPostInstall then
+            begin
+              if SteamPathStr <> '''' then
               begin
-                MsgBox(''Failed to save Steam path configuration. Please try again.'', mbError, MB_OK);
-                Result := False;
+                { Now we can save to the app directory after installation is complete }
+                YamlFile := ExpandConstant(''{app}\steam_path.yaml'');
+
+                { Create YAML content with properly escaped paths }
+                YamlContent := ''steam:'' + #13#10 +
+                               ''  path: "'' + SteamPathStr + ''"'' + #13#10 +
+                               ''  gsi_path: "'' + GsiConfigPathStr + ''"'' + #13#10;
+
+                { Save YAML file }
+                if not SaveStringToFile(YamlFile, YamlContent, False) then
+                begin
+                  MsgBox(''Failed to save Steam path configuration. Please try again.'', mbError, MB_OK);
+                end;
               end;
             end;
           end;
           ' > inno_setup.iss
+        shell: pwsh
 
       - name: Build Inno Setup installer
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" inno_setup.iss
         shell: pwsh
-          
+
       - name: Sign the installer
         run: |
           # Find signtool
@@ -396,47 +443,47 @@ jobs:
             "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe",
             "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
           )
-          
+
           foreach ($path in $possiblePaths) {
             if (Test-Path $path) {
               $signtoolPath = $path
               break
             }
           }
-          
+
           if (-not $signtoolPath) {
             $signtoolPath = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1).FullName
           }
-          
+
           # Sign the installer
           if ($signtoolPath -and (Test-Path "keenmind_setup_${{ env.VERSION }}.exe")) {
             Write-Host "Signing installer with signtool at: $signtoolPath"
-            & $signtoolPath sign /f codesign.pfx /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /d "Keenmind Installer ${{ env.VERSION }}" /du "https://github.com/dotact-ai/keenmind" "keenmind_setup_${{ env.VERSION }}.exe"
+            & $signtoolPath sign /f codesign.pfx /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /d "Keenmind Installer ${{ env.VERSION }}" /du "https://dotactai.com" "keenmind_setup_${{ env.VERSION }}.exe"
           } else {
-            Write-Host "Signtool.exe not found or installer does not exist at expected path. Skipping installer signing."
+            Write-Host "Signtool.exe not found or executable does not exist at expected path. Skipping installer signing."
           }
         shell: pwsh
         continue-on-error: true
-          
+
       - name: Create ZIP package of application files
         run: |
           # Add README to the zip
-          Set-Content -Path "dist\keenmind\How_to_Install.txt" -Value "Keenmind Installation Instructions`n`n1. Extract this ZIP to a folder of your choice`n2. Right-click keenmind.exe and select 'Run as administrator'`n3. If Windows SmartScreen shows a warning, click 'More info' then 'Run anyway'`n`nThis software is safe to use.`n"
+          Set-Content -Path "dist\keenmind\How_to_Install.txt" -Value "Keenmind Installation Instructions`n`n1. Extract this ZIP to a folder of your choice`n2. Right-click keenmind.exe and select 'Run as administrator'`n3. If Windows SmartScreen shows a warning, click 'More info' then 'Run anyway'`n`nThis software is digitally signed and safe to use.`n"
           Compress-Archive -Path dist\keenmind\* -DestinationPath keenmind_files_${{ env.VERSION }}.zip -Force
         shell: pwsh
-          
+
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
           name: keenmind-files-${{ env.VERSION }}
           path: keenmind_files_${{ env.VERSION }}.zip
-          
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: keenmind-installer-${{ env.VERSION }}
           path: keenmind_setup_${{ env.VERSION }}.exe
-          
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -446,52 +493,35 @@ jobs:
           name: Release ${{ env.VERSION }}
           body: |
             # Keenmind Release ${{ env.VERSION }}
-            
+
             This release contains the Keenmind AI Assistant for Dota 2.
-            
+
             ## Installation
-            
+
             ### Option 1: Using the Installer (Recommended)
             1. Download `keenmind_setup_${{ env.VERSION }}.exe`
             2. When your browser shows a security warning, click "Keep" or "Download anyway"
-            3. Run the installer and follow the instructions
-            
+            3. This warning appears because we use a self-signed certificate rather than a purchased one
+            4. The application is completely safe to use
+            5. Run the installer and follow the instructions
+
             ### Option 2: Manual Installation
             1. Download `keenmind_files_${{ env.VERSION }}.zip`
             2. Extract the contents to a folder of your choice
             3. Run `keenmind.exe` to start the application
-            
+
             ## About Security Warnings
-            
-            Windows may show security warnings because this is a new application. These warnings are normal for new software and don't indicate any security issues.
-            
+
+            Windows SmartScreen may flag our installer because:
+            - It's digitally signed with a self-signed certificate rather than a purchased one
+            - Our application doesn't yet have a reputation built with Microsoft
+
+            These warnings don't indicate any actual security issue with the software.
+
             ## Need Help?
-            
+
             If you encounter any issues during installation or usage, please open an issue on GitHub.
 
-      - name: Create secrets configuration
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-        run: |
-          # Create the cloud directory if it doesn't exist
-          New-Item -Path "src/cloud" -ItemType Directory -Force
-          
-          # Create secrets_config.yaml with GitHub secrets
-          $secretsContent = @"
-          # AWS Credentials
-          aws:
-            access_key_id: $env:AWS_ACCESS_KEY_ID
-            secret_access_key: $env:AWS_SECRET_ACCESS_KEY
-            region: us-east-2
-
-          # Google OAuth
-          google_oauth:
-            client_id: $env:GOOGLE_CLIENT_ID
-            client_secret: $env:GOOGLE_CLIENT_SECRET
-          "@
-          
-          Set-Content -Path "src/cloud/secrets_config.yaml" -Value $secretsContent
-          Write-Host "Created secrets configuration for build"
+      # --- THIS STEP WAS MOVED BEFORE 'Build with PyInstaller' ---
+      # - name: Create embedded credentials module
+      #   ... (step content is now earlier in the file)

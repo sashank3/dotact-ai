@@ -2,18 +2,13 @@ import logging
 import threading
 
 def setup_gsi_files():
-    """Set up GSI configuration files if this is the first install."""
+    """Set up GSI configuration files."""
     from src.gsi.gsi_file_setup import gsi_file_setup
     from src.config import config
     
-    # Check if this is the first install using the config manager
-    first_install = config.get("data", "gsi", "dota2", "first_install", default=False)
-    
-    if first_install:
-        logging.info("[GSI] First installation detected. Setting up GSI files...")
-        gsi_file_setup()
-    else:
-        logging.info("[GSI] Not first install, skipping GSI file setup")
+    logging.info("[GSI] Setting up GSI files...")
+    gsi_file_setup()
+
 
 def start_gsi_server():
     """Start the GSI server in a separate thread."""

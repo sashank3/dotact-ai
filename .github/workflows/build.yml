@@ -35,11 +35,13 @@ jobs:
         run: |
           echo "__version__ = '${{ env.VERSION }}'" > src/version.py
 
+      # --- MODIFIED STEP: Prepare app icon ---
+      # Changed source image to public/favicon.png
       - name: Prepare app icon
         run: |
           pip install pillow
           mkdir -p resources
-          python -c "from PIL import Image; img = Image.open('images/app_logo.png'); img.save('resources/app_icon.ico')"
+          python -c "from PIL import Image; img = Image.open('public/favicon.png'); img.save('resources/app_icon.ico')"
         continue-on-error: true
 
       - name: Generate file version info
@@ -65,12 +67,12 @@ jobs:
                 StringTable(
                   u'040904E4',
                   [StringStruct(u'CompanyName', u'DotACT AI'),
-                  StringStruct(u'FileDescription', u'Keenmind - AI Assistant for Dota 2'),
+                  StringStruct(u'FileDescription', u'Keenplay - AI Assistant for Dota 2'),
                   StringStruct(u'FileVersion', u'${{ env.VERSION }}'),
-                  StringStruct(u'InternalName', u'keenmind'),
+                  StringStruct(u'InternalName', u'keenplay'),
                   StringStruct(u'LegalCopyright', u'Copyright © 2024 DotACT AI'),
-                  StringStruct(u'OriginalFilename', u'keenmind.exe'),
-                  StringStruct(u'ProductName', u'Keenmind'),
+                  StringStruct(u'OriginalFilename', u'keenplay.exe'),
+                  StringStruct(u'ProductName', u'Keenplay'),
                   StringStruct(u'ProductVersion', u'${{ env.VERSION }}')])
                 ]),
               VarFileInfo([VarStruct(u'Translation', [1033, 1252])])
@@ -78,11 +80,6 @@ jobs:
           )" > file_version_info.txt
         shell: pwsh
 
-      # --- MOVED STEP: Create credentials file BEFORE PyInstaller runs ---
-      # This ensures the generated Python file exists when PyInstaller scans the source tree,
-      # allowing it to be compiled to bytecode and embedded in the final executable.
-      # Security Note: Embedding as bytecode is obscurity, not strong security.
-      # The secrets can potentially be recovered via decompilation.
       - name: Create embedded credentials module
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -114,15 +111,16 @@ jobs:
           Set-Content -Path "src/config/embedded_credentials.py" -Value $credentialsModule
           Write-Host "Created embedded credentials module at src/config/embedded_credentials.py"
         shell: pwsh
-      # --- END OF MOVED STEP ---
 
+      # --- MODIFIED STEP: Build with PyInstaller ---
+      # Removed --add-data for images/app_logo.png
       - name: Build with PyInstaller
         run: |
           # Create application manifest with explicit security preferences
           echo '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
           <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-            <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="DotACT.Keenmind.Client" type="win32"/>
-            <description>Keenmind - AI Assistant for Dota 2</description>
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="DotACT.Keenplay.Client" type="win32"/>
+            <description>Keenplay - AI Assistant for Dota 2</description>
             <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
               <security>
                 <requestedPrivileges>
@@ -139,7 +137,7 @@ jobs:
                 <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
               </application>
             </compatibility>
-          </assembly>' > keenmind.manifest
+          </assembly>' > keenplay.manifest
 
           # Copy config files (except secrets) to build directory for --add-data
           # Note: The src/config/embedded_credentials.py is NOT copied here;
@@ -152,11 +150,10 @@ jobs:
           # Build with more conservative options that are less likely to trigger AV
           # PyInstaller will now find and embed src/config/embedded_credentials.py as bytecode
           pyinstaller --clean `
-            --name keenmind `
+            --name keenplay `
             --icon="resources/app_icon.ico" `
-            --manifest="keenmind.manifest" `
+            --manifest="keenplay.manifest" `
             --add-data "src;src" `
-            --add-data "images/app_logo.png;images" `
             --add-data "build/config;config" `
             --hidden-import=fastapi `
             --hidden-import=chainlit `
@@ -186,8 +183,8 @@ jobs:
             main.py
 
           # Create reputation-building files
-          Set-Content -Path "dist/keenmind/README.txt" -Value "Keenmind v${{ env.VERSION }}`n`nPublisher: DotACT AI`n`nThis software is digitally signed and safe to use.`n"
-          Set-Content -Path "dist/keenmind/VERIFICATION.txt" -Value "This software was created by DotACT AI and has been digitally signed.`n`nTo verify the signature:`n1. Right-click on keenmind.exe`n2. Select Properties`n3. Go to the Digital Signatures tab`n4. You should see a signature from DotACT AI`n"
+          Set-Content -Path "dist/keenplay/README.txt" -Value "Keenplay v${{ env.VERSION }}`n`nPublisher: DotACT AI`n`nThis software is digitally signed and safe to use.`n"
+          Set-Content -Path "dist/keenplay/VERIFICATION.txt" -Value "This software was created by DotACT AI and has been digitally signed.`n`nTo verify the signature:`n1. Right-click on keenplay.exe`n2. Select Properties`n3. Go to the Digital Signatures tab`n4. You should see a signature from DotACT AI`n"
         shell: pwsh
 
       - name: Create enhanced self-signed certificate
@@ -233,10 +230,10 @@ jobs:
             $signtoolPath = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1).FullName
           }
 
-          if ($signtoolPath -and (Test-Path "dist\keenmind\keenmind.exe")) {
+          if ($signtoolPath -and (Test-Path "dist\keenplay\keenplay.exe")) {
             Write-Host "Using signtool at: $signtoolPath"
             # Sign with enhanced attributes and timestamping
-            & $signtoolPath sign /f $pfxPath /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /as /d "Keenmind - AI Assistant for Dota 2" /du "https://dotactai.com" dist\keenmind\keenmind.exe
+            & $signtoolPath sign /f $pfxPath /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /as /d "Keenplay - AI Assistant for Dota 2" /du "https://dotactai.com" dist\keenplay\keenplay.exe
           } else {
             Write-Host "Signtool.exe not found or executable does not exist at expected path. Skipping code signing."
           }
@@ -250,9 +247,9 @@ jobs:
       - name: Create license agreement file
         run: |
           Set-Content -Path "license.txt" -Value @"
-          END USER LICENSE AGREEMENT FOR KEENMIND SOFTWARE
+          END USER LICENSE AGREEMENT FOR KEENPLAY SOFTWARE
 
-          IMPORTANT - READ CAREFULLY: This End User License Agreement ("EULA") is a legal agreement between you (either an individual or a single entity) and DotACT AI for the Keenmind software product identified above, which includes computer software and associated media and documentation ("SOFTWARE PRODUCT"). By installing, copying, or otherwise using the SOFTWARE PRODUCT, you agree to be bound by the terms of this EULA. If you do not agree to the terms of this EULA, do not install or use the SOFTWARE PRODUCT.
+          IMPORTANT - READ CAREFULLY: This End User License Agreement ("EULA") is a legal agreement between you (either an individual or a single entity) and DotACT AI for the Keenplay software product identified above, which includes computer software and associated media and documentation ("SOFTWARE PRODUCT"). By installing, copying, or otherwise using the SOFTWARE PRODUCT, you agree to be bound by the terms of this EULA. If you do not agree to the terms of this EULA, do not install or use the SOFTWARE PRODUCT.
 
           1. GRANT OF LICENSE
           The SOFTWARE PRODUCT is licensed, not sold. This EULA grants you the following rights:
@@ -299,21 +296,23 @@ jobs:
           "@
         shell: pwsh
 
+      # --- MODIFIED STEP: Create Inno Setup script ---
+      # Removed [Files] entry for images/app_logo.png
       - name: Create Inno Setup script
         run: |
           echo '[Setup]
-          AppName=Keenmind
+          AppName=Keenplay
           AppVersion=${{ env.VERSION }}
-          AppVerName=Keenmind ${{ env.VERSION }}
+          AppVerName=Keenplay ${{ env.VERSION }}
           AppPublisher=DotACT AI
           AppCopyright=Copyright © 2024 DotACT AI
-          DefaultDirName={pf}\Keenmind
-          DefaultGroupName=Keenmind
+          DefaultDirName={pf}\Keenplay
+          DefaultGroupName=Keenplay
           LicenseFile=license.txt
-          InfoBeforeFile=dist\keenmind\VERIFICATION.txt
-          UninstallDisplayIcon={app}\keenmind.exe
+          InfoBeforeFile=dist\keenplay\VERIFICATION.txt
+          UninstallDisplayIcon={app}\keenplay.exe
           OutputDir=.
-          OutputBaseFilename=keenmind_setup_${{ env.VERSION }}
+          OutputBaseFilename=keenplay_setup_${{ env.VERSION }}
           Compression=lzma2/ultra64
           SolidCompression=yes
           PrivilegesRequired=admin
@@ -329,16 +328,15 @@ jobs:
           Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"; Flags: checkedonce
 
           [Files]
-          Source: "dist\keenmind\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-          Source: "images\app_logo.png"; DestDir: "{app}\images"; Flags: ignoreversion
+          Source: "dist\keenplay\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
           [Icons]
-          Name: "{group}\Keenmind"; Filename: "{app}\keenmind.exe"; Comment: "Launch Keenmind AI Assistant"
-          Name: "{group}\Uninstall Keenmind"; Filename: "{uninstallexe}"
-          Name: "{commondesktop}\Keenmind"; Filename: "{app}\keenmind.exe"; Tasks: desktopicon; Comment: "Launch Keenmind AI Assistant"
+          Name: "{group}\Keenplay"; Filename: "{app}\keenplay.exe"; Comment: "Launch Keenplay AI Assistant"
+          Name: "{group}\Uninstall Keenplay"; Filename: "{uninstallexe}"
+          Name: "{commondesktop}\Keenplay"; Filename: "{app}\keenplay.exe"; Tasks: desktopicon; Comment: "Launch Keenplay AI Assistant"
 
           [Run]
-          Filename: "{app}\keenmind.exe"; Description: "Launch Keenmind"; Flags: nowait postinstall skipifsilent
+          Filename: "{app}\keenplay.exe"; Description: "Launch Keenplay"; Flags: nowait postinstall skipifsilent
 
           [Code]
           var
@@ -415,8 +413,8 @@ jobs:
 
                 { Create YAML content with properly escaped paths }
                 YamlContent := ''steam:'' + #13#10 +
-                               ''  path: "'' + SteamPathStr + ''"'' + #13#10 +
-                               ''  gsi_path: "'' + GsiConfigPathStr + ''"'' + #13#10;
+                                 ''  path: "'' + SteamPathStr + ''"'' + #13#10 +
+                                 ''  gsi_path: "'' + GsiConfigPathStr + ''"'' + #13#10;
 
                 { Save YAML file }
                 if not SaveStringToFile(YamlFile, YamlContent, False) then
@@ -456,9 +454,9 @@ jobs:
           }
 
           # Sign the installer
-          if ($signtoolPath -and (Test-Path "keenmind_setup_${{ env.VERSION }}.exe")) {
+          if ($signtoolPath -and (Test-Path "keenplay_setup_${{ env.VERSION }}.exe")) {
             Write-Host "Signing installer with signtool at: $signtoolPath"
-            & $signtoolPath sign /f codesign.pfx /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /d "Keenmind Installer ${{ env.VERSION }}" /du "https://dotactai.com" "keenmind_setup_${{ env.VERSION }}.exe"
+            & $signtoolPath sign /f codesign.pfx /p "password" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /d "Keenplay Installer ${{ env.VERSION }}" /du "https://dotactai.com" "keenplay_setup_${{ env.VERSION }}.exe"
           } else {
             Write-Host "Signtool.exe not found or executable does not exist at expected path. Skipping installer signing."
           }
@@ -468,47 +466,47 @@ jobs:
       - name: Create ZIP package of application files
         run: |
           # Add README to the zip
-          Set-Content -Path "dist\keenmind\How_to_Install.txt" -Value "Keenmind Installation Instructions`n`n1. Extract this ZIP to a folder of your choice`n2. Right-click keenmind.exe and select 'Run as administrator'`n3. If Windows SmartScreen shows a warning, click 'More info' then 'Run anyway'`n`nThis software is digitally signed and safe to use.`n"
-          Compress-Archive -Path dist\keenmind\* -DestinationPath keenmind_files_${{ env.VERSION }}.zip -Force
+          Set-Content -Path "dist\keenplay\How_to_Install.txt" -Value "Keenplay Installation Instructions`n`n1. Extract this ZIP to a folder of your choice`n2. Right-click keenplay.exe and select 'Run as administrator'`n3. If Windows SmartScreen shows a warning, click 'More info' then 'Run anyway'`n`nThis software is digitally signed and safe to use.`n"
+          Compress-Archive -Path dist\keenplay\* -DestinationPath keenplay_files_${{ env.VERSION }}.zip -Force
         shell: pwsh
 
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: keenmind-files-${{ env.VERSION }}
-          path: keenmind_files_${{ env.VERSION }}.zip
+          name: keenplay-files-${{ env.VERSION }}
+          path: keenplay_files_${{ env.VERSION }}.zip
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: keenmind-installer-${{ env.VERSION }}
-          path: keenmind_setup_${{ env.VERSION }}.exe
+          name: keenplay-installer-${{ env.VERSION }}
+          path: keenplay_setup_${{ env.VERSION }}.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            keenmind_files_${{ env.VERSION }}.zip
-            keenmind_setup_${{ env.VERSION }}.exe
+            keenplay_files_${{ env.VERSION }}.zip
+            keenplay_setup_${{ env.VERSION }}.exe
           name: Release ${{ env.VERSION }}
           body: |
-            # Keenmind Release ${{ env.VERSION }}
+            # Keenplay Release ${{ env.VERSION }}
 
-            This release contains the Keenmind AI Assistant for Dota 2.
+            This release contains the Keenplay AI Assistant for Dota 2.
 
             ## Installation
 
             ### Option 1: Using the Installer (Recommended)
-            1. Download `keenmind_setup_${{ env.VERSION }}.exe`
+            1. Download `keenplay_setup_${{ env.VERSION }}.exe`
             2. When your browser shows a security warning, click "Keep" or "Download anyway"
             3. This warning appears because we use a self-signed certificate rather than a purchased one
             4. The application is completely safe to use
             5. Run the installer and follow the instructions
 
             ### Option 2: Manual Installation
-            1. Download `keenmind_files_${{ env.VERSION }}.zip`
+            1. Download `keenplay_files_${{ env.VERSION }}.zip`
             2. Extract the contents to a folder of your choice
-            3. Run `keenmind.exe` to start the application
+            3. Run `keenplay.exe` to start the application
 
             ## About Security Warnings
 
@@ -521,7 +519,3 @@ jobs:
             ## Need Help?
 
             If you encounter any issues during installation or usage, please open an issue on GitHub.
-
-      # --- THIS STEP WAS MOVED BEFORE 'Build with PyInstaller' ---
-      # - name: Create embedded credentials module
-      #   ... (step content is now earlier in the file)

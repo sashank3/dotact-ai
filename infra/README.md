@@ -1,6 +1,6 @@
-# Keenmind Infrastructure
+# Keenplay Infrastructure
 
-This directory contains the AWS CDK infrastructure code for the Keenmind Dota 2 Assistant application.
+This directory contains the AWS CDK infrastructure code for the Keenplay Dota 2 Assistant application.
 
 ## Architecture
 

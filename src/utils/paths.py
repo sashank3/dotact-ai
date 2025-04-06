@@ -39,11 +39,11 @@ def get_user_data_path():
     Get the path to the user data directory
     
     In dev: [repo_root]/data
-    In prod: C:/Users/[Username]/AppData/Roaming/Keenmind/data
+    In prod: C:/Users/[Username]/AppData/Roaming/Keenplay/data
     """
     if is_frozen():
         # In production, use AppData/Roaming for user data
-        app_data = os.path.join(os.environ['APPDATA'], 'Keenmind', 'data')
+        app_data = os.path.join(os.environ['APPDATA'], 'Keenplay', 'data')
         os.makedirs(app_data, exist_ok=True)
         return app_data
     else:
@@ -57,11 +57,11 @@ def get_logs_path():
     Get the path to the logs directory
     
     In dev: [repo_root]/logs
-    In prod: C:/Users/[Username]/AppData/Local/Keenmind/logs
+    In prod: C:/Users/[Username]/AppData/Local/Keenplay/logs
     """
     if is_frozen():
         # In production, use AppData/Local for logs
-        local_app_data = os.path.join(os.environ['LOCALAPPDATA'], 'Keenmind', 'logs')
+        local_app_data = os.path.join(os.environ['LOCALAPPDATA'], 'Keenplay', 'logs')
         os.makedirs(local_app_data, exist_ok=True)
         return local_app_data
     else:

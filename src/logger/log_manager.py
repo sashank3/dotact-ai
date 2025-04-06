@@ -3,217 +3,277 @@ import os
 import logging
 import sys
 import queue
+import threading # For QueueListener thread safety checks
+import atexit
 from datetime import datetime
 from functools import wraps
 from logging.handlers import QueueHandler, QueueListener
-from src.config import config
-from src.bootstrap import is_frozen
+
+# Assuming these imports work correctly based on your project structure
+try:
+    from src.config import config # Assuming config is accessible early
+    from src.bootstrap import is_frozen # Assuming bootstrap is accessible early
+except ImportError as e:
+    print(f"CRITICAL IMPORT ERROR in log_manager: {e}. Check paths.", file=sys.stderr)
+    # Define fallbacks if imports fail, although this might indicate bigger issues
+    class MockConfig:
+        logging_config = {
+            "format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
+            "level": logging.INFO,
+            "logs_dir": "logs_fallback"
+        }
+    config = MockConfig()
+    def is_frozen(): return False
+
+
+# --- Configuration ---
+LOG_FORMAT = config.logging_config.get("format", "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s")
+ROOT_LOG_LEVEL = logging.DEBUG # Let root logger capture everything
+CONSOLE_LOG_LEVEL = config.logging_config.get("level", logging.INFO) # Console level
+FILE_LOG_LEVEL = logging.DEBUG # File level - capture everything in files
+ERROR_LOG_LEVEL = logging.WARNING # Error file level
+# --- End Configuration ---
 
 class LogManager:
     _instance = None
-    
+    _lock = threading.Lock() # Lock for thread-safe singleton creation
+
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
+            with cls._lock:
+                # Double-check locking
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    # Use a flag to prevent recursive initialization if logging is used *during* init
+                    cls._instance._initialized = False
+                    cls._instance._initialize()
         return cls._instance
-    
+
     def _initialize(self):
+        # Prevent re-initialization within the same process
+        if hasattr(self, '_initialized') and self._initialized:
+            # Use print as logging might not be ready
+            print(f"[LogManager._initialize {os.getpid()}] Already initialized. Skipping.", file=sys.stderr)
+            return
+
+        print(f"[LogManager._initialize {os.getpid()}] Initializing...", file=sys.stderr)
+
+        # Determine Session Directory (Crucial for subprocesses)
         if "SESSION_DIR" in os.environ:
             self.session_dir = os.environ["SESSION_DIR"]
-            # Re-initialize file paths from existing session dir
-            self.keenmind_log_file = os.path.join(self.session_dir, "keenmind.log")
-            self.error_log_file = os.path.join(self.session_dir, "error.log")
-            self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
+            print(f"[LogManager._initialize {os.getpid()}] Using existing SESSION_DIR: {self.session_dir}", file=sys.stderr)
         else:
-            # Only create new session dir if not already set
+            # Only create new session dir if not already set (likely the parent process)
             base_logs_dir = config.logging_config["logs_dir"]
             os.makedirs(base_logs_dir, exist_ok=True)
-            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.session_dir = os.path.join(base_logs_dir, f"session_{timestamp}")
             os.makedirs(self.session_dir, exist_ok=True)
-            
-            self.keenmind_log_file = os.path.join(self.session_dir, "keenmind.log")
-            self.error_log_file = os.path.join(self.session_dir, "error.log")
-            self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
-            
-            os.environ["SESSION_DIR"] = self.session_dir  # Set for child processes
-        
-        # Configure logging - always do this regardless of whether session dir already exists
+            # Set environment variable for potential child processes *before* configuring logging
+            os.environ["SESSION_DIR"] = self.session_dir
+            print(f"[LogManager._initialize {os.getpid()}] Created new SESSION_DIR: {self.session_dir}", file=sys.stderr)
+
+        # Define log file paths based on the session directory
+        self.keenmind_log_file = os.path.join(self.session_dir, "keenplay.log")
+        self.error_log_file = os.path.join(self.session_dir, "error.log")
+        self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
+
+        # Shared log queue for this process
+        self.log_queue = queue.Queue(-1)
+        self.queue_listener = None # Initialize listener attribute
+
+        # Configure logging handlers and listener for *this* process
         self._configure_logging()
-        
-        logging.info(f"[LOG MANAGER] Session directory: {self.session_dir}")
+
+        # Mark as initialized for this process
+        self._initialized = True
+        print(f"[LogManager._initialize {os.getpid()}] Initialization complete. Logging configured.", file=sys.stderr)
+        # Use try-except for initial log message in case configuration failed silently
+        try:
+            logging.info(f"[LOG MANAGER {os.getpid()}] Session directory: {self.session_dir}")
+            logging.debug(f"[LOG MANAGER {os.getpid()}] Python executable: {sys.executable}")
+            logging.debug(f"[LOG MANAGER {os.getpid()}] Frozen: {is_frozen()}")
+        except Exception as log_init_err:
+             print(f"[LogManager._initialize {os.getpid()}] Error during initial logging message: {log_init_err}", file=sys.stderr)
+
 
     def _configure_logging(self):
-        # Clear existing handlers to prevent duplicates
-        root_logger = logging.getLogger()
-        # Stop listener if it exists before removing handlers
+        """Sets up logging handlers and listener for the current process."""
+        process_id = os.getpid()
+        print(f"[LogManager._configure_logging {process_id}] Configuring logging...", file=sys.stderr)
+
+        # --- Stop existing listener if any ---
         if hasattr(self, 'queue_listener') and self.queue_listener:
-             try:
-                 self.queue_listener.stop()
-             except Exception as e:
-                 # Use print here as logging might be broken during reconfiguration
-                 print(f"Error stopping existing queue listener: {e}", file=sys.stderr)
-             self.queue_listener = None # Ensure it's reset
-
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-            # Attempt to close handler if possible
+            print(f"[LogManager._configure_logging {process_id}] Stopping existing queue listener...", file=sys.stderr)
             try:
-                handler.close()
-            except Exception:
-                pass # Ignore errors closing handlers
+                # Ensure listener is stopped before removing handlers it might use
+                self.queue_listener.stop()
+                print(f"[LogManager._configure_logging {process_id}] Existing queue listener stopped.", file=sys.stderr)
+            except Exception as e:
+                print(f"[LogManager._configure_logging {process_id}] Error stopping existing listener: {e}", file=sys.stderr)
+            self.queue_listener = None # Reset attribute
 
-        # Create log formatter
-        log_format = config.logging_config.get("format", "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s")
-        formatter = logging.Formatter(log_format)
+        # --- Clear existing handlers from root logger (REVERTED TO OLD STYLE) ---
+        root_logger = logging.getLogger()
+        print(f"[LogManager._configure_logging {process_id}] Current root handlers before removal: {root_logger.handlers}", file=sys.stderr)
+        if root_logger.hasHandlers(): # Check if there are any handlers first
+             for handler in root_logger.handlers[:]: # Iterate over a copy
+                 print(f"[LogManager._configure_logging {process_id}] Removing handler (Old Style): {handler}", file=sys.stderr)
+                 root_logger.removeHandler(handler)
+                 try:
+                     handler.close() # Attempt to close removed handlers
+                 except Exception as close_err:
+                     print(f"[LogManager._configure_logging {process_id}] Ignored error closing handler {handler}: {close_err}", file=sys.stderr)
+        print(f"[LogManager._configure_logging {process_id}] Handlers after removal (Old Style): {root_logger.handlers}", file=sys.stderr)
+        # --- End Reverted Handler Removal ---
 
-        # Create a log queue for async-safe logging
-        if not hasattr(self, 'log_queue') or self.log_queue is None:
-             self.log_queue = queue.Queue(-1) # No limit on size
+        # --- Create formatter ---
+        formatter = logging.Formatter(LOG_FORMAT)
 
-        # --- Create handlers ---
+        # --- Create handlers for the listener ---
         handlers_for_listener = []
 
-        # 1. Main log file handler (keenmind.log) - logs everything
+        # 1. Main file handler (keenplay.log)
         try:
-            main_file_handler = logging.FileHandler(self.keenmind_log_file, mode='a', encoding='utf-8')
+            main_file_handler = logging.FileHandler(self.keenmind_log_file, mode='a', encoding='utf-8', errors='ignore')
             main_file_handler.setFormatter(formatter)
-            main_file_handler.setLevel(config.logging_config.get("level", logging.INFO))
+            main_file_handler.setLevel(FILE_LOG_LEVEL)
             handlers_for_listener.append(main_file_handler)
+            print(f"[LogManager._configure_logging {process_id}] Added main_file_handler for {self.keenmind_log_file}", file=sys.stderr)
         except Exception as e:
-            print(f"Error creating main log file handler: {e}", file=sys.stderr)
+            print(f"[LogManager._configure_logging {process_id}] Error creating main log file handler: {e}", file=sys.stderr)
 
-
-        # 2. Error log file handler (error.log) - logs warnings and errors only
+        # 2. Error file handler (error.log)
         try:
-            error_file_handler = logging.FileHandler(self.error_log_file, mode='a', encoding='utf-8')
+            error_file_handler = logging.FileHandler(self.error_log_file, mode='a', encoding='utf-8', errors='ignore')
             error_file_handler.setFormatter(formatter)
-            error_file_handler.setLevel(logging.WARNING) # WARNING and higher (ERROR, CRITICAL)
+            error_file_handler.setLevel(ERROR_LOG_LEVEL)
             handlers_for_listener.append(error_file_handler)
+            print(f"[LogManager._configure_logging {process_id}] Added error_file_handler for {self.error_log_file}", file=sys.stderr)
         except Exception as e:
-            print(f"Error creating error log file handler: {e}", file=sys.stderr)
+            print(f"[LogManager._configure_logging {process_id}] Error creating error log file handler: {e}", file=sys.stderr)
 
-
-        # 3. Console handler - Conditionally add only if NOT frozen (windowed)
+        # 3. Console handler (only if not frozen/packaged and stdout is a tty)
         if not is_frozen():
             try:
-                # Check if stdout is valid before creating handler
-                if sys.stdout:
+                if sys.stdout and hasattr(sys.stdout, 'isatty') and sys.stdout.isatty():
                     console_handler = logging.StreamHandler(sys.stdout)
                     console_handler.setFormatter(formatter)
-                    console_handler.setLevel(config.logging_config.get("level", logging.INFO))
+                    console_handler.setLevel(CONSOLE_LOG_LEVEL)
                     handlers_for_listener.append(console_handler)
+                    print(f"[LogManager._configure_logging {process_id}] Added console handler (dev mode).", file=sys.stderr)
                 else:
-                     # Use print as logging might not be fully working
-                     print("[LogManager] sys.stdout is None, console handler disabled.", file=sys.stderr)
+                    print(f"[LogManager._configure_logging {process_id}] Skipping console handler (stdout not a tty or None/unavailable).", file=sys.stderr)
             except Exception as e:
-                 print(f"Error creating console handler: {e}", file=sys.stderr)
+                print(f"[LogManager._configure_logging {process_id}] Error creating console handler: {e}", file=sys.stderr)
         else:
-             # Use print as logging might not be fully working
-             print("[LogManager] Frozen mode detected, console handler disabled.", file=sys.stderr)
+             print(f"[LogManager._configure_logging {process_id}] Skipping console handler (frozen mode).", file=sys.stderr)
 
-
-        # Setup the queue listener (runs in a separate thread)
-        # Only proceed if we have valid handlers
+        # --- Setup QueueListener (if handlers exist) ---
         if handlers_for_listener:
+            # Ensure queue exists before creating listener
+            if not hasattr(self, 'log_queue') or self.log_queue is None:
+                 self.log_queue = queue.Queue(-1)
+                 print(f"[LogManager._configure_logging {process_id}] Recreated log_queue.", file=sys.stderr)
+
             self.queue_listener = QueueListener(
                 self.log_queue,
-                *handlers_for_listener, # Pass the list of handlers
+                *handlers_for_listener,
                 respect_handler_level=True
             )
+            print(f"[LogManager._configure_logging {process_id}] Created QueueListener with handlers: {handlers_for_listener}", file=sys.stderr)
         else:
-             print("[LogManager] No valid handlers configured for QueueListener!", file=sys.stderr)
-             self.queue_listener = None # Ensure listener is None if setup failed
+            print(f"[LogManager._configure_logging {process_id}] No valid handlers created for QueueListener! Log records may be lost.", file=sys.stderr)
+            self.queue_listener = None
 
-        # Setup the queue handler (used by loggers)
+        # --- Setup QueueHandler (attached to root logger) ---
+        # Ensure queue exists before creating handler
+        if not hasattr(self, 'log_queue') or self.log_queue is None:
+             self.log_queue = queue.Queue(-1)
+             print(f"[LogManager._configure_logging {process_id}] Recreated log_queue before QueueHandler.", file=sys.stderr)
+
         queue_handler = QueueHandler(self.log_queue)
-
-        # Configure the root logger
         root_logger.addHandler(queue_handler)
-        root_logger.setLevel(config.logging_config.get("level", logging.INFO))
+        print(f"[LogManager._configure_logging {process_id}] Added QueueHandler to root logger.", file=sys.stderr)
 
-        # Set specific module log levels (Consider moving these to your config file)
+        # --- Configure root logger level ---
+        root_logger.setLevel(ROOT_LOG_LEVEL)
+        print(f"[LogManager._configure_logging {process_id}] Set root logger level to {logging.getLevelName(ROOT_LOG_LEVEL)}.", file=sys.stderr)
+
+        # --- Set specific module levels (optional, but good practice) ---
         logging.getLogger('src.cloud.api').setLevel(logging.DEBUG)
         logging.getLogger('src.ui.chainlit_app').setLevel(logging.DEBUG)
         logging.getLogger('src.ui.auth').setLevel(logging.DEBUG)
-        # Consider adjusting uvicorn levels if needed, though log_config handles its internal setup
+        logging.getLogger('src.gsi.server').setLevel(logging.INFO)
+        logging.getLogger('src.gsi.state_manager').setLevel(logging.INFO)
         logging.getLogger('uvicorn').setLevel(logging.INFO)
         logging.getLogger('uvicorn.error').setLevel(logging.INFO)
-        logging.getLogger('uvicorn.access').setLevel(logging.WARNING) # Keep access logs quieter at root level
+        logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
+        logging.getLogger('asyncio').setLevel(logging.INFO)
+        logging.getLogger('botocore').setLevel(logging.INFO)
+        logging.getLogger('urllib3').setLevel(logging.INFO)
+        # Add chainlit specific logger level if needed/known
+        # logging.getLogger('chainlit').setLevel(logging.INFO)
 
-        # Start the queue listener in a background thread if it was created
+        # --- Start the QueueListener thread ---
         if self.queue_listener:
-            self.queue_listener.start()
-            # Use print initially as logging might rely on the listener
-            print("[LogManager] QueueListener started.")
+            print(f"[LogManager._configure_logging {process_id}] Starting QueueListener thread...", file=sys.stderr)
+            try:
+                self.queue_listener.start()
+                print(f"[LogManager._configure_logging {process_id}] QueueListener started.", file=sys.stderr)
+                # Register shutdown for this specific listener instance
+                # Ensure listener is stored before registering atexit
+                current_listener = self.queue_listener
+                atexit.register(self.shutdown_listener, current_listener, process_id)
+            except Exception as start_err:
+                 print(f"[LogManager._configure_logging {process_id}] FAILED to start QueueListener thread: {start_err}", file=sys.stderr)
+                 self.queue_listener = None # Mark as not running
         else:
-            print("[LogManager] QueueListener not started due to handler errors.", file=sys.stderr)
+            print(f"[LogManager._configure_logging {process_id}] QueueListener not created or not started.", file=sys.stderr)
 
-
-        # Patching logging methods might not be necessary if QueueHandler solves blocking,
-        # but keep if you handle very large objects frequently.
-        # Ensure patching happens only once if _configure_logging can be called multiple times.
-        if not hasattr(self, '_logging_patched') or not self._logging_patched:
-             self._patch_logging_methods()
-             self._logging_patched = True
-
-    def _patch_logging_methods(self):
-        """
-        Patch standard logging methods to make them safe for large objects
-        and prevent event loop blocking.
-        """
-        # Create decorator for safe logging
-        def safe_log_decorator(func):
-            @wraps(func)
-            def wrapper(self, msg, *args, **kwargs):
-                # Convert large objects to safe representations
-                if args and len(args) > 0:
-                    new_args = []
-                    for arg in args:
-                        # If the argument is a dictionary or other large object, limit its size
-                        if isinstance(arg, dict) and len(str(arg)) > 1000:
-                            # Create a truncated version for large dictionaries
-                            truncated = {k: str(v)[:100] + '...' if isinstance(v, str) and len(str(v)) > 100 else v 
-                                        for k, v in list(arg.items())[:10]}
-                            if len(arg) > 10:
-                                truncated['...'] = f'[{len(arg) - 10} more items]'
-                            new_args.append(truncated)
-                        elif isinstance(arg, str) and len(arg) > 1000:
-                            new_args.append(arg[:1000] + '... [truncated]')
-                        else:
-                            new_args.append(arg)
-                    return func(self, msg, *new_args, **kwargs)
-                return func(self, msg, *args, **kwargs)
-            return wrapper
-        
-        # Apply the decorator to standard logging methods
-        logging.Logger.debug = safe_log_decorator(logging.Logger.debug)
-        logging.Logger.info = safe_log_decorator(logging.Logger.info)
-        logging.Logger.warning = safe_log_decorator(logging.Logger.warning)
-        logging.Logger.error = safe_log_decorator(logging.Logger.error)
+        print(f"[LogManager._configure_logging {process_id}] Configuration finished.", file=sys.stderr)
 
     def get_chat_history_path(self) -> str:
+        """Returns the path to the chat history file for the current session."""
+        # Check if initialized and session_dir exists
+        if not hasattr(self, '_initialized') or not self._initialized or not hasattr(self, 'session_dir'):
+             print(f"[LogManager {os.getpid()}] WARN: get_chat_history_path called before full initialization or session_dir missing.", file=sys.stderr)
+             # Fallback logic
+             if "SESSION_DIR" in os.environ:
+                 return os.path.join(os.environ["SESSION_DIR"], "chat_history.json")
+             else:
+                 return os.path.join(config.logging_config.get("logs_dir", "logs_fallback"), "chat_history_fallback.json")
+        # If initialized, return the stored path
+        if not hasattr(self, 'chat_history_file'):
+             # Define it if somehow missing after initialization
+             self.chat_history_file = os.path.join(self.session_dir, "chat_history.json")
         return self.chat_history_file
-        
-    def reconfigure(self):
-        """Force reconfiguration of logging - useful for subprocesses"""
-        # Stop any existing queue listener
-        if hasattr(self, 'queue_listener') and self.queue_listener:
-            self.queue_listener.stop()
-            
-        self._configure_logging()
-        logging.info("Logging reconfigured")
-    
-    def shutdown(self):
-        """Properly shut down logging system"""
-        if hasattr(self, 'queue_listener') and self.queue_listener:
-            self.queue_listener.stop()
-            logging.info("Log queue listener shut down")
 
-log_manager = LogManager()
+    def shutdown_listener(self, listener, process_id):
+        """Safely stops a specific QueueListener instance. Registered via atexit."""
+        # Check if the listener object exists and is not None
+        if listener:
+            print(f"[LogManager.shutdown_listener {process_id}] Stopping listener {id(listener)} via atexit...", file=sys.stderr)
+            try:
+                listener.stop() # This should wait for the queue to empty
+                print(f"[LogManager.shutdown_listener {process_id}] Listener stopped.", file=sys.stderr)
+            except Exception as e:
+                print(f"[LogManager.shutdown_listener {process_id}] Error stopping listener during atexit: {e}", file=sys.stderr)
+        else:
+             print(f"[LogManager.shutdown_listener {process_id}] No valid listener object provided to shutdown.", file=sys.stderr)
 
-# Ensure the log manager is properly shut down on program exit
-import atexit
-atexit.register(log_manager.shutdown)
+# --- Instantiate the Singleton ---
+# This line is crucial. Importing log_manager elsewhere triggers _initialize()
+try:
+    log_manager = LogManager()
+except Exception as manager_init_err:
+     print(f"CRITICAL ERROR during LogManager instantiation: {manager_init_err}", file=sys.stderr)
+     # Fallback: Configure basic logging to stderr if manager fails completely
+     logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - [FALLBACK_LOGGER] - %(message)s", stream=sys.stderr)
+     logging.critical("LogManager failed to initialize. Using fallback stderr logging.")
+     # Define a dummy log_manager if needed elsewhere? Or just let it fail?
+     class DummyLogManager:
+         session_dir = "logs_fallback"
+         def get_chat_history_path(self): return os.path.join(self.session_dir, "chat_history_fallback.json")
+         # Add other methods as needed to prevent crashes elsewhere
+     log_manager = DummyLogManager()

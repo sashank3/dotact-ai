@@ -44,7 +44,7 @@ logger.info(f"Using Auth redirect URI: {config.auth_redirect_uri}")
 serializer = URLSafeSerializer(config.fastapi_secret_key)
 
 # Create FastAPI app
-auth_app = FastAPI(title="Keenmind Authentication")
+auth_app = FastAPI(title="Keenplay Authentication")
 
 # Global variables to track service status
 is_chainlit_running = False

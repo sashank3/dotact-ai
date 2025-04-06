@@ -178,4 +178,5 @@ chainlit.md
 # CDK Infra
 infra/cdk.out/
 infra/node_modules/
+/images
 

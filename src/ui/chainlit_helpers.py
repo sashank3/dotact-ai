@@ -4,7 +4,6 @@ import logging
 import base64
 import time
 from itsdangerous import URLSafeSerializer, BadSignature, SignatureExpired
-import chainlit as cl
 
 # Configure logging
 logger = logging.getLogger(__name__)

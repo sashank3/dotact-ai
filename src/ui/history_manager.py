@@ -1,5 +1,5 @@
 """
-History manager for storing and retrieving chat history for Keenmind.
+History manager for storing and retrieving chat history for Keenplay.
 This module handles saving and loading chat history for users.
 """
 import os
@@ -24,7 +24,7 @@ from src.logger.log_manager import log_manager
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def save_chat_history(user_id: str, query: str, response: str, thinking_content: str = "") -> None:
+def save_chat_history(user_id: str, query: str, response: str, game_state: dict, thinking_content: str = "") -> None:
     """
     Save a chat entry to the session's chat history.
     
@@ -32,6 +32,7 @@ def save_chat_history(user_id: str, query: str, response: str, thinking_content:
         user_id: The user's ID (email)
         query: The user's query
         response: The response from the system
+        game_state: The game state dictionary at the time of the query
         thinking_content: The thinking/reasoning content from the LLM (optional)
     """
     try:
@@ -44,24 +45,14 @@ def save_chat_history(user_id: str, query: str, response: str, thinking_content:
         # Get current timestamp
         timestamp = datetime.datetime.now().isoformat()
         
-        # Load game state at the time of the query
-        game_state = {}
-        state_file_path = config.state_file_path
-        if os.path.exists(state_file_path) and os.path.getsize(state_file_path) > 0:
-            try:
-                with open(state_file_path, "r") as f:
-                    game_state = json.load(f)
-            except json.JSONDecodeError as e:
-                logger.error(f"Error parsing game state file: {str(e)}")
-        
-        # Create chat entry
+        # Create chat entry using the game_state passed as an argument
         chat_entry = {
             "timestamp": timestamp,
             "user_id": user_id,
             "query": query,
             "response": response,
             "thinking_content": thinking_content,
-            "game_state": game_state
+            # "game_state": game_state
         }
         
         # Load existing history or create new one

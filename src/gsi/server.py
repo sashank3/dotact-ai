@@ -35,7 +35,7 @@ STATE_FILE_PATH = config.state_file_path
 logger.info(f"Using game state file: {STATE_FILE_PATH}")
 
 # Create FastAPI app
-gsi_app = FastAPI(title="Keenmind GSI Server")
+gsi_app = FastAPI(title="Keenplay GSI Server")
 
 # Define the game state update model
 class GameStateUpdate(BaseModel):

@@ -4,7 +4,6 @@ import threading
 def setup_gsi_files():
     """Set up GSI configuration files."""
     from src.gsi.gsi_file_setup import gsi_file_setup
-    from src.config import config
     
     logging.info("[GSI] Setting up GSI files...")
     gsi_file_setup()

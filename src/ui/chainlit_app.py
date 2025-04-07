@@ -4,25 +4,17 @@ import os
 import logging
 import re
 import json
-import time
-# Simple, reliable path handling (Keep this as is)
+import signal
+
 if getattr(sys, 'frozen', False):
     sys.path.insert(0, os.path.dirname(sys.executable))
 else:
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root_dir)
 
-# ==============================================================================
-# CRITICAL: Import log_manager *early* to ensure logging is configured
-#           for this process using the SESSION_DIR environment variable set by auth.py
-# ==============================================================================
-print(f"[chainlit_app.py {os.getpid()}] Importing log_manager...", file=sys.stderr)
-from src.logger.log_manager import log_manager
-print(f"[chainlit_app.py {os.getpid()}] log_manager imported.", file=sys.stderr)
-# ==============================================================================
-
 # Import configuration AFTER log_manager might be needed by config itself
 from src.config import config
+from src.bootstrap import is_frozen
 
 # Import needed modules
 from src.gsi.state_manager import state_manager
@@ -62,6 +54,50 @@ async def set_starters():
             message="What's the best approach for upcoming team fights based on our lineup?",
         )
     ]
+
+@cl.on_chat_end
+async def on_chat_end():
+    """
+    Called when the chat session ends.
+    In production, signals the main application process to initiate shutdown.
+    """
+    logger.info("Chainlit on_chat_end executing...")
+
+    # --- Only trigger shutdown in production environment ---
+    if is_frozen():
+        logger.info("Production environment detected. Attempting to signal main process for shutdown.")
+        try:
+            # --- Get main process PID from environment variable ---
+            main_pid_str = os.environ.get('MAIN_APP_PID')
+            if main_pid_str:
+                main_pid = int(main_pid_str)
+                logger.info(f"Found main process PID: {main_pid}. Sending SIGTERM...")
+
+                # --- Send SIGTERM signal to the main process ---
+                os.kill(main_pid, signal.SIGTERM)
+
+                logger.info(f"Successfully sent SIGTERM to process {main_pid}.")
+            else:
+                logger.error("MAIN_APP_PID environment variable not found. Cannot signal main process.")
+
+        except ValueError:
+            logger.error(f"Invalid MAIN_APP_PID found in environment: '{main_pid_str}'.")
+        except ProcessLookupError:
+            logger.error(f"Main process with PID {main_pid} not found. It might have already exited.")
+        except PermissionError:
+             logger.error(f"Permission denied trying to send signal to PID {main_pid}.")
+        except Exception as e:
+            logger.error(f"Error signaling main process during on_chat_end: {str(e)}", exc_info=True)
+    else:
+        # --- Development environment behavior ---
+        logger.info("Development environment detected. Skipping main process shutdown signal.")
+        # You might still want some local cleanup here if needed for dev
+        if hasattr(state_manager, 'stop'):
+            state_manager.stop()
+            logger.info("State manager stopped (dev mode cleanup).")
+
+    logger.info("on_chat_end processing finished.")
+    # This Chainlit process will eventually be terminated by main.py's terminate_application
 
 @cl.on_chat_start
 async def start():
@@ -272,6 +308,5 @@ if __name__ == "__main__":
      logger.info("Chainlit app module loaded directly by Chainlit CLI.")
      logger.info(f"API URL (from __main__): {PROCESS_QUERY_API_URL}")
      logger.info(f"State file path (from config): {config.state_file_path}")
-     logger.info(f"Session Dir (from log_manager): {log_manager.session_dir}")
 
 # --- End chainlit_app.py ---

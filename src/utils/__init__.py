@@ -6,6 +6,7 @@ import logging
 
 # Re-export paths functions for easy access throughout the app
 from src.utils.paths import get_config_path, get_user_data_path, get_logs_path
+from .shutdown import terminate_application
 
 def setup_event_loop_policy():
     """Configure the event loop policy for better async behavior."""

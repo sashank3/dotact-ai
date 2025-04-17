@@ -318,9 +318,9 @@ export class KeenMindLambdaStack extends cdk.Stack {
       }),
       layers: [processingLayer],
       environment: {
-        SECRET_NAME: 'LLMCredentials',
         USER_POOL_ID: userPoolId,
-        LLM_PROVIDER: 'fireworks',
+        LLM_PROVIDER: 'sambanova',
+        API_KEY: this.llmSecrets.secretValueFromJson('API_KEY').unsafeUnwrap(),
         DEPLOYMENT_TIMESTAMP: Date.now().toString(), // Force update
       },
       timeout: cdk.Duration.seconds(60),

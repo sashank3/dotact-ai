@@ -38,18 +38,25 @@ def get_config_path():
 def get_public_file_path(filename: str) -> str | None:
     """
     Get the absolute path to a file within the 'public' directory.
-    Handles differences between development and frozen environments via get_application_root().
+    Handles differences between development and frozen environments.
+    In frozen mode, expects files to be bundled relative to sys._MEIPASS.
     """
     if not filename:
         logger.warning("get_public_file_path called with empty filename.")
         return None
 
     try:
-        app_root = get_application_root()
-        public_dir = os.path.join(app_root, 'public')
-        file_path = os.path.join(public_dir, filename)
-        logger.debug(f"Resolved public file path for '{filename}': {file_path}")
-        return file_path
+        if is_frozen() and hasattr(sys, '_MEIPASS'):
+            # Frozen mode (PyInstaller): Use path relative to _MEIPASS. This corresponds to the '_internal' directory structure.
+            public_dir = os.path.join(sys._MEIPASS, 'public')
+            file_path = os.path.join(public_dir, filename)
+            # Check if the file actually exists in the bundle
+            if not os.path.exists(file_path):
+                 logger.warning(f"Public file '{filename}' not found in frozen bundle at: {file_path}")
+                 return None
+            logger.debug(f"Resolved public file path (frozen) for '{filename}': {file_path}")
+            return file_path
+        
     except Exception as e:
         logger.error(f"Error resolving public file path for '{filename}': {e}", exc_info=True)
         return None

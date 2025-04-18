@@ -439,38 +439,70 @@ def start_chainlit():
         chainlit_process = None
         is_chainlit_running = False
 
-def run_auth_server(host="0.0.0.0", port=None):
-    """Start the authentication server."""
-    if port is None:
-        port = config.auth_port
-        
+def run_auth_server(
+    host="0.0.0.0",
+    port=None,
+    shutdown_event: threading.Event = None,
+    server_instance_wrapper: list = None
+):
+    """Start the authentication server and handle graceful shutdown."""
+    port = port or config.auth_port
+
     logger.info(f"Starting authentication server on port {port}")
-    
-    # Open browser in a separate thread after a short delay
+
+    # --- Browser opening logic (Keep as is) ---
+    browser_opened = False
     def open_browser():
+        nonlocal browser_opened
+        # Check if the shutdown event is already set before opening
+        if shutdown_event and shutdown_event.is_set():
+             logger.info("Shutdown initiated before browser could open.")
+             return
         time.sleep(1.5)  # Give the server a moment to start
+         # Double check shutdown event *after* sleep
+        if shutdown_event and shutdown_event.is_set():
+             logger.info("Shutdown initiated before browser could open (post-sleep).")
+             return
         url = f"http://localhost:{port}/direct-login"
         logger.info(f"Opening browser to: {url}")
-        webbrowser.open(url)
-    
-    # Start browser thread
-    browser_thread = threading.Thread(target=open_browser)
-    browser_thread.daemon = True
-    browser_thread.start()
-    
+        try:
+            webbrowser.open(url)
+            browser_opened = True
+        except Exception as e:
+            logger.error(f"Failed to open browser: {e}")
+
+    # Start browser thread only if not shutting down
+    if not (shutdown_event and shutdown_event.is_set()):
+        browser_thread = threading.Thread(target=open_browser, daemon=True)
+        browser_thread.start()
+    else:
+        logger.info("Skipping browser opening due to immediate shutdown signal.")
+    # --- End Browser Opening ---
+
+    # Configure Uvicorn server instance
+    config_uvicorn = uvicorn.Config(
+        app=auth_app, # Use the instance directly
+        host=host,
+        port=port,
+        log_level="info",
+        access_log=False, # Keep logs cleaner
+        reload=False, # Important
+        log_config=config.uvicorn_log_config # Use your custom log config
+    )
+    server = uvicorn.Server(config_uvicorn)
+
+    # Store the server instance if a wrapper is provided
+    if server_instance_wrapper is not None:
+        server_instance_wrapper.append(server)
+
+    # Start the server - this blocks until shutdown is triggered
     try:
-        # Use uvicorn.Config and Server classes for thread-safe operation
-        config_uvicorn = uvicorn.Config(
-            app=auth_app,
-            host=host,
-            port=port,
-            log_level="info",
-            access_log=False,
-            log_config=config.uvicorn_log_config
-        )
-        server = uvicorn.Server(config_uvicorn)
         server.run()
+        logger.info("[Auth Server] Uvicorn server stopped.")
     except Exception as e:
         logger.exception(f"CRITICAL ERROR during Auth server run() execution: {e}")
     finally:
-        logger.info("run_auth_server function finished or failed.")
+        # Clean up the reference in the wrapper if it exists
+        if server_instance_wrapper is not None and server in server_instance_wrapper:
+            server_instance_wrapper.remove(server)
+        logger.info("run_auth_server function finished.")

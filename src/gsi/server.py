@@ -7,6 +7,7 @@ import sys
 import logging
 import json
 import traceback
+import threading
 import aiofiles
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -100,32 +101,50 @@ async def startup_event():
             await f.write(json.dumps({}))
         logger.info(f"Created empty game state file at {STATE_FILE_PATH}")
 
-def run_gsi_server(host=None, port=None):
-    """Run the GSI server."""
+@gsi_app.on_event("shutdown")
+async def shutdown_gsi_event():
+    """Handle GSI server shutdown."""
+    logger.info("[GSI Server] Shutting down")
+    # Add any specific GSI cleanup tasks here if needed in the future
+
+def run_gsi_server(
+    host=None,
+    port=None,
+    shutdown_event: threading.Event = None,
+    server_instance_wrapper: list = None
+):
+    """Run the GSI server and handle graceful shutdown."""
     # Use provided host/port or fall back to config
-    if host is None:
-        host = config.gsi_host
-    
-    if port is None:
-        port = config.gsi_port
-    
+    host = host or config.gsi_host
+    port = port or config.gsi_port
+
     # Log the configuration
     logger.info(f"Starting GSI server on {host}:{port}")
-    
+
+    # Configure Uvicorn server instance
+    config_uvicorn = uvicorn.Config(
+        app="src.gsi.server:gsi_app", # Reference the app instance directly
+        host=host,
+        port=port,
+        reload=False, # Important: reload=False for programmatic control
+        log_level="info",
+        access_log=False, # Keep logs cleaner
+        log_config=config.uvicorn_log_config # Use your custom log config
+    )
+    server = uvicorn.Server(config_uvicorn)
+
+    # Store the server instance if a wrapper is provided
+    if server_instance_wrapper is not None:
+        server_instance_wrapper.append(server)
+
+    # Start the server - this blocks until shutdown is triggered
     try:
-        # Use uvicorn.Config and Server classes for thread-safe operation
-        config_uvicorn = uvicorn.Config(
-            app="src.gsi.server:gsi_app",
-            host=host,
-            port=port,
-            reload=False,
-            log_level="info",
-            access_log=False,
-            log_config=config.uvicorn_log_config
-        )
-        server = uvicorn.Server(config_uvicorn)
         server.run()
+        logger.info("[GSI Server] Uvicorn server stopped.")
     except Exception as e:
         logger.exception(f"CRITICAL ERROR during GSI server run() execution: {e}")
     finally:
-        logger.info("run_gsi_server function finished or failed.")
+        # Clean up the reference in the wrapper if it exists
+        if server_instance_wrapper is not None and server in server_instance_wrapper:
+            server_instance_wrapper.remove(server)
+        logger.info("run_gsi_server function finished.")

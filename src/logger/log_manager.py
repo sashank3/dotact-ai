@@ -221,13 +221,9 @@ class LogManager:
             try:
                 self.queue_listener.start()
                 print(f"[LogManager._configure_logging {process_id}] QueueListener started.", file=sys.stderr)
-                # Register shutdown for this specific listener instance
-                # Ensure listener is stored before registering atexit
-                current_listener = self.queue_listener
-                atexit.register(self.shutdown_listener, current_listener, process_id)
             except Exception as start_err:
                  print(f"[LogManager._configure_logging {process_id}] FAILED to start QueueListener thread: {start_err}", file=sys.stderr)
-                 self.queue_listener = None # Mark as not running
+                 self.queue_listener = None
         else:
             print(f"[LogManager._configure_logging {process_id}] QueueListener not created or not started.", file=sys.stderr)
 
@@ -250,15 +246,15 @@ class LogManager:
         return self.chat_history_file
 
     def shutdown_listener(self, listener, process_id):
-        """Safely stops a specific QueueListener instance. Registered via atexit."""
+        """Safely stops a specific QueueListener instance. Called explicitly by shutdown logic."""
         # Check if the listener object exists and is not None
         if listener:
-            print(f"[LogManager.shutdown_listener {process_id}] Stopping listener {id(listener)} via atexit...", file=sys.stderr)
+            print(f"[LogManager.shutdown_listener {process_id}] Stopping listener {id(listener)} explicitly...", file=sys.stderr)
             try:
                 listener.stop() # This should wait for the queue to empty
                 print(f"[LogManager.shutdown_listener {process_id}] Listener stopped.", file=sys.stderr)
             except Exception as e:
-                print(f"[LogManager.shutdown_listener {process_id}] Error stopping listener during atexit: {e}", file=sys.stderr)
+                print(f"[LogManager.shutdown_listener {process_id}] Error stopping listener: {e}", file=sys.stderr)
         else:
              print(f"[LogManager.shutdown_listener {process_id}] No valid listener object provided to shutdown.", file=sys.stderr)
 

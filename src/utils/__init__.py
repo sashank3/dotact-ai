@@ -120,10 +120,10 @@ def _open_keenplay(icon, item):
 
     """Callback function to open the application in the browser."""    
     # Use AUTH_PORT as the entry point which handles login/redirects
-    url = f"http://localhost:{config.auth_port}/direct-login"
-    logger.info(f"Tray action: Opening KeenPlay at {url}")
+    url = f"http://localhost:{config.auth_port}/app"
+    logger.info(f"Tray action: Opening KeenPlay via auth endpoint at {url}")
     try:
-        webbrowser.open(url)
+        webbrowser.open(url, new=2)
     except Exception as e:
         logger.error(f"Failed to open browser: {e}")
 

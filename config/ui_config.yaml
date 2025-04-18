@@ -1,6 +1,7 @@
 # UI configuration
 chainlit:
   app_path: "src/ui/chainlit_app.py"  # Relative to project root
+  icon_path: "public/favicon.png"  # Relative to project root
   port: 8001
 
 auth:

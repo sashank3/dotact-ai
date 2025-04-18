@@ -110,6 +110,10 @@ class ConfigManager:
         return self.ui_config.get("chainlit", {}).get("app_path", "src/ui/chainlit_app.py")
     
     @property
+    def chainlit_tray_icon_path(self):
+        return self.ui_config.get("chainlit", {}).get("icon_path", "public/favicon.py")
+    
+    @property
     def chainlit_port(self):
         return self.ui_config.get("chainlit", {}).get("port", 8001)
     

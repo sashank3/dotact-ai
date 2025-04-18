@@ -16,7 +16,6 @@ from src.utils.paths import get_config_path, get_user_data_path, get_logs_path
 
 # Import necessary components from other modules
 from src.bootstrap import is_frozen
-from src.config import config
 
 # Get a logger instance for utility functions
 logger = logging.getLogger(__name__)
@@ -117,6 +116,8 @@ def initiate_shutdown(
 # --- System Tray Logic ---
 
 def _open_keenplay(icon, item):
+    from src.config import config
+
     """Callback function to open the application in the browser."""    
     # Use AUTH_PORT as the entry point which handles login/redirects
     url = f"http://localhost:{config.auth_port}/direct-login"
@@ -144,6 +145,7 @@ def _exit_action(icon, item, shutdown_event, gsi_thread, auth_thread, gsi_server
 
 def run_system_tray(shutdown_event, gsi_thread, auth_thread, gsi_server_instance, auth_server_instance, log_manager_instance):
     """Sets up and runs the system tray icon or waits if not applicable."""
+    from src.config import config
     tray_icon = None
 
     if is_frozen(): # Only attempt to run tray icon in frozen mode

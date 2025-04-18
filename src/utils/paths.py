@@ -2,7 +2,8 @@ import os
 import sys
 from src.bootstrap import is_frozen, get_application_root
 import logging
-import yaml
+
+logger = logging.getLogger(__name__)
 
 def get_config_path():
     """
@@ -16,23 +17,42 @@ def get_config_path():
         if hasattr(sys, '_MEIPASS'):
             bundled_config = os.path.join(sys._MEIPASS, 'config')
             if os.path.exists(bundled_config):
-                logging.info(f"Using bundled config from: {bundled_config}")
+                logger.info(f"Using bundled config from: {bundled_config}")
                 return bundled_config
             
         # Fallback: Check for configs in the application directory (unlikely but possible)
         app_config = os.path.join(get_application_root(), 'config')
         if os.path.exists(app_config):
-            logging.info(f"Using config from application directory: {app_config}")
+            logger.info(f"Using config from application directory: {app_config}")
             return app_config
             
         # We really shouldn't get here, but just in case, log a warning
-        logging.warning("Configuration directory not found in bundled resources!")
+        logger.warning("Configuration directory not found in bundled resources!")
         return os.path.join(get_application_root(), 'config')
     else:
         # In development, use repo/config
         config_path = os.path.join(get_application_root(), 'config')
         os.makedirs(config_path, exist_ok=True)
         return config_path
+    
+def get_public_file_path(filename: str) -> str | None:
+    """
+    Get the absolute path to a file within the 'public' directory.
+    Handles differences between development and frozen environments via get_application_root().
+    """
+    if not filename:
+        logger.warning("get_public_file_path called with empty filename.")
+        return None
+
+    try:
+        app_root = get_application_root()
+        public_dir = os.path.join(app_root, 'public')
+        file_path = os.path.join(public_dir, filename)
+        logger.debug(f"Resolved public file path for '{filename}': {file_path}")
+        return file_path
+    except Exception as e:
+        logger.error(f"Error resolving public file path for '{filename}': {e}", exc_info=True)
+        return None
 
 def get_user_data_path():
     """
@@ -113,10 +133,10 @@ def read_steam_path_config(config_path):
             
         # Validate that we have the minimum required fields
         if not config['steam'].get('path') or not config['steam'].get('gsi_path'):
-            logging.warning("Missing required fields in steam configuration")
+            logger.warning("Missing required fields in steam configuration")
             
         return config
             
     except Exception as e:
-        logging.error(f"Failed to parse steam configuration file: {e}")
+        logger.error(f"Failed to parse steam configuration file: {e}")
         return None 

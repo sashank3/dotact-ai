@@ -6,7 +6,7 @@ convenient access to configuration values via properties.
 import os
 import yaml
 import logging
-from src.utils.paths import get_config_path, get_logs_path
+from src.utils.paths import get_config_path, get_logs_path, get_public_file_path
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -111,7 +111,7 @@ class ConfigManager:
     
     @property
     def chainlit_tray_icon_path(self):
-        return self.ui_config.get("chainlit", {}).get("icon_path", "public/favicon.py")
+        return get_public_file_path("favicon.png")
     
     @property
     def chainlit_port(self):

@@ -16,6 +16,7 @@ from src.utils.paths import get_config_path, get_user_data_path, get_logs_path
 
 # Import necessary components from other modules
 from src.bootstrap import is_frozen
+from src.config import config
 
 # Get a logger instance for utility functions
 logger = logging.getLogger(__name__)
@@ -116,9 +117,7 @@ def initiate_shutdown(
 # --- System Tray Logic ---
 
 def _open_keenplay(icon, item):
-    """Callback function to open the application in the browser."""
-    from src.config import config
-    
+    """Callback function to open the application in the browser."""    
     # Use AUTH_PORT as the entry point which handles login/redirects
     url = f"http://localhost:{config.auth_port}/direct-login"
     logger.info(f"Tray action: Opening KeenPlay at {url}")

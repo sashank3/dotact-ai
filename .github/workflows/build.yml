@@ -22,7 +22,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller==6.1.0
-          pip install aiofiles==23.2.1 aiohttp==3.11.13 fastapi==0.115.8 itsdangerous==2.2.0 numpy==2.2.2 openai==1.61.1 python-dotenv==1.0.1 python-jose==3.4.0 pyyaml==6.0.2 requests==2.32.3 uvicorn==0.34.0 chainlit==2.2.1
+          pip install aiofiles==23.2.1 aiohttp==3.11.13 fastapi==0.115.8 itsdangerous==2.2.0 numpy==2.2.2 openai==1.61.1 python-dotenv==1.0.1 python-jose==3.4.0 pyyaml==6.0.2 requests==2.32.3 uvicorn==0.34.0 chainlit==2.2.1 Pillow pystray
           pip install boto3==1.26.0
           pip install jmespath==1.0.1 s3transfer==0.10.0
 
@@ -35,8 +35,6 @@ jobs:
         run: |
           echo "__version__ = '${{ env.VERSION }}'" > src/version.py
 
-      # --- MODIFIED STEP: Prepare app icon ---
-      # Changed source image to public/favicon.png
       - name: Prepare app icon
         run: |
           pip install pillow
@@ -112,8 +110,6 @@ jobs:
           Write-Host "Created embedded credentials module at src/config/embedded_credentials.py"
         shell: pwsh
 
-      # --- MODIFIED STEP: Build with PyInstaller ---
-      # Removed --add-data for images/app_logo.png
       - name: Build with PyInstaller
         run: |
           # Create application manifest with explicit security preferences
@@ -155,6 +151,7 @@ jobs:
             --manifest="keenplay.manifest" `
             --add-data "src;src" `
             --add-data "build/config;config" `
+            --add-data "public;public" `
             --hidden-import=fastapi `
             --hidden-import=chainlit `
             --hidden-import=aiofiles `

@@ -172,6 +172,8 @@ jobs:
             --hidden-import=uvicorn.lifespan `
             --hidden-import=uvicorn.workers `
             --hidden-import=pydantic `
+            --hidden-import=runpy `
+            --hidden-import=chainlit.cli `
             --collect-all chainlit `
             --noconfirm `
             --windowed `

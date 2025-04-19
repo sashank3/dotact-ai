@@ -30,6 +30,7 @@ else:
 
 # Import configuration
 from src.config import config
+from src.bootstrap import is_frozen
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -371,7 +372,7 @@ async def shutdown_event():
             is_chainlit_running = False
 
 def start_chainlit():
-    """Start the Chainlit server using the bundled Python interpreter."""
+    """Start the Chainlit server correctly, avoiding re-launching the main app."""
     global chainlit_process, is_chainlit_running
 
     if chainlit_process is not None and chainlit_process.poll() is None:
@@ -382,58 +383,83 @@ def start_chainlit():
     logger.info(f"Preparing to start Chainlit server on port {config.chainlit_port} with app {config.chainlit_app_path}")
 
     try:
-        # Construct the command as a list
-        command = [
-            sys.executable,             # Path to the bundled Python executable
-            "-m",                       # Run module as script
-            "chainlit",                 # The chainlit module
-            "run",                      # The 'run' command for chainlit
-            config.chainlit_app_path,   # Path to your chainlit app script
-            "--port",
-            str(config.chainlit_port),  # Port number
-            "--headless"                # Keep headless mode
-        ]
+        # Use the same executable for both dev and prod, but with different args
+        python_executable = sys.executable
+        
+        if is_frozen():
+            # In frozen mode, use the same executable but with the helper script path
+            # This will trigger our special mode in main.py
+            helper_script_path = os.path.join(sys._MEIPASS if hasattr(sys, '_MEIPASS') else '', 
+                                            'src', 'utils', 'run_chainlit_entry.py')
+            
+            if not os.path.exists(helper_script_path):
+                logger.warning(f"Helper script not found at {helper_script_path}, falling back to relative path")
+                helper_script_path = 'src/utils/run_chainlit_entry.py'
+            
+            command = [
+                python_executable,  # The main exe will detect these args and run in Chainlit-only mode
+                helper_script_path,
+                config.chainlit_app_path,
+                str(config.chainlit_port)
+            ]
+        else:
+            # Development mode - use standard chainlit module approach
+            command = [
+                python_executable,
+                "-m",
+                "chainlit",
+                "run",
+                config.chainlit_app_path,
+                "--port", str(config.chainlit_port),
+                "--headless"
+            ]
 
-        logger.info(f"Executing command: {' '.join(command)}") # Log the command being run
+        logger.info(f"Executing command: {' '.join(command)}")
 
-        # Define creation flags for Windows to hide console window
+        # Set up process creation flags for Windows
         creationflags = 0
         if sys.platform == "win32":
             creationflags = subprocess.CREATE_NO_WINDOW
-
-        # Start chainlit using the specific Python executable, without the shell
+        
+        # Create environment with SESSION_DIR for proper logging
+        chainlit_env = os.environ.copy()
+        
+        # Start the process
         chainlit_process = subprocess.Popen(
             command,
-            shell=False,  # IMPORTANT: Do NOT use shell=True with a list command
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            creationflags=creationflags # Hide console window on Windows
+            env=chainlit_env,
+            creationflags=creationflags
         )
 
-        # Optional: Brief wait to see if it fails immediately
-        time.sleep(2)
-
+        # Wait briefly to allow immediate failure detection
+        time.sleep(1)
+        
         if chainlit_process.poll() is None:
-            # Process is still running after the brief wait
             is_chainlit_running = True
             logger.info(f"Chainlit server process started successfully (PID: {chainlit_process.pid}).")
         else:
-            # Process terminated quickly, likely an error
-            stdout, stderr = chainlit_process.communicate() # Get output
+            # Process error handling
+            try:
+                stdout, stderr = chainlit_process.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = "", "Process did not terminate."
+                chainlit_process.kill()
+                stdout, stderr = chainlit_process.communicate()
+                
             logger.error(f"Chainlit server failed to start. Return code: {chainlit_process.returncode}")
-            if stdout:
-                logger.error(f"Chainlit stdout:\n{stdout}")
-            if stderr:
-                logger.error(f"Chainlit stderr:\n{stderr}") # This should contain the error message
-            chainlit_process = None # Reset the global variable
+            if stdout: logger.error(f"Chainlit stdout:\n{stdout.strip()}")
+            if stderr: logger.error(f"Chainlit stderr:\n{stderr.strip()}")
+            chainlit_process = None
             is_chainlit_running = False
-
+            
     except FileNotFoundError:
-         # This might happen if sys.executable is somehow incorrect, though unlikely
-         logger.error(f"Error starting Chainlit: Could not find Python executable at '{sys.executable}'", exc_info=True)
-         chainlit_process = None
-         is_chainlit_running = False
+        logger.error(f"Error starting Chainlit: Could not find executable", exc_info=True)
+        chainlit_process = None
+        is_chainlit_running = False
     except Exception as e:
         logger.error(f"An unexpected error occurred starting Chainlit: {e}", exc_info=True)
         chainlit_process = None
